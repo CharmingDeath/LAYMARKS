@@ -332,132 +332,6 @@ class ApiService {
     return quotes;
   }
 
-  Future<List<CalendarEvent>> fetchEconomicCalendar({required String from, required String to}) async {
-    if (_useProxy) {
-      final uri = Uri.parse('$_proxyBase/calendar/economic').replace(queryParameters: {'from': from, 'to': to});
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('Proxy economic calendar error: ${response.statusCode}');
-      }
-      final dynamic data = jsonDecode(response.body);
-      return _parseCalendarEvents(data, type: CalendarEventType.economic);
-    }
-    final uri = Uri.parse('$_fmpStableBase/economic-calendar').replace(queryParameters: {
-      'from': from,
-      'to': to,
-      'apikey': AppSecrets.fmpApiKey,
-    });
-    final response = await http.get(uri, headers: _fmpHeaders());
-    if (response.statusCode != 200) {
-      throw Exception('FMP economic calendar error: ${response.statusCode}');
-    }
-    final dynamic data = jsonDecode(response.body);
-    return _parseCalendarEvents(data, type: CalendarEventType.economic);
-  }
-
-  Future<List<CalendarEvent>> fetchEarningsCalendar({required String from, required String to}) async {
-    if (_useProxy) {
-      final uri = Uri.parse('$_proxyBase/calendar/earnings').replace(queryParameters: {'from': from, 'to': to});
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('Proxy earnings calendar error: ${response.statusCode}');
-      }
-      final dynamic data = jsonDecode(response.body);
-      return _parseCalendarEvents(data, type: CalendarEventType.earnings);
-    }
-    final uri = Uri.parse('$_fmpStableBase/earnings-calendar').replace(queryParameters: {
-      'from': from,
-      'to': to,
-      'apikey': AppSecrets.fmpApiKey,
-    });
-    final response = await http.get(uri, headers: _fmpHeaders());
-    if (response.statusCode != 200) {
-      throw Exception('FMP earnings calendar error: ${response.statusCode}');
-    }
-    final dynamic data = jsonDecode(response.body);
-    return _parseCalendarEvents(data, type: CalendarEventType.earnings);
-  }
-
-  Future<List<CalendarEvent>> fetchUpcomingEvents() async {
-    final now = DateTime.now();
-    final from = _formatDate(now.subtract(const Duration(days: 1)));
-    final to = _formatDate(now.add(const Duration(days: 21)));
-    final results = await Future.wait([
-      fetchEconomicCalendar(from: from, to: to),
-      fetchEarningsCalendar(from: from, to: to),
-    ]);
-    final combined = [...results[0], ...results[1]];
-    combined.sort((a, b) => a.date.compareTo(b.date));
-    return combined.take(10).toList();
-  }
-
-  Future<List<HistoricalPoint>> fetchHistoricalSeries({
-    required String symbol,
-    required String from,
-    required String to,
-  }) async {
-    if (_useProxy) {
-      final uri = Uri.parse('$_proxyBase/market/history')
-          .replace(queryParameters: {'symbol': symbol, 'from': from, 'to': to});
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('Proxy history error: ${response.statusCode}');
-      }
-      final dynamic data = jsonDecode(response.body);
-      return _parseHistory(data);
-    }
-    final uri = Uri.parse('$_fmpStableBase/historical-price-eod/light').replace(queryParameters: {
-      'symbol': symbol,
-      'from': from,
-      'to': to,
-      'apikey': AppSecrets.fmpApiKey,
-    });
-    final response = await http.get(uri, headers: _fmpHeaders());
-    if (response.statusCode != 200) {
-      throw Exception('FMP history error: ${response.statusCode}');
-    }
-    final dynamic data = jsonDecode(response.body);
-    return _parseHistory(data);
-  }
-
-  List<CalendarEvent> _parseCalendarEvents(dynamic data, {required CalendarEventType type}) {
-    final List<dynamic> list = data is List ? data : (data is Map ? (data['data'] as List<dynamic>? ?? []) : []);
-    return list.map((raw) => CalendarEvent.fromMap(raw as Map<String, dynamic>, type: type)).toList();
-  }
-
-  List<HistoricalPoint> _parseHistory(dynamic data) {
-    List<dynamic> list = [];
-    if (data is List) {
-      list = data;
-    } else if (data is Map && data['historical'] is List) {
-      list = data['historical'] as List<dynamic>;
-    }
-    final points = <HistoricalPoint>[];
-    for (final item in list) {
-      if (item is! Map) continue;
-      final dateRaw = item['date']?.toString() ?? '';
-      final closeRaw = item['close'] ?? item['adjClose'] ?? item['price'];
-      final date = DateTime.tryParse(dateRaw);
-      final close = closeRaw is num ? closeRaw.toDouble() : double.tryParse(closeRaw?.toString() ?? '');
-      if (date == null || close == null) continue;
-      points.add(HistoricalPoint(date: date, value: close));
-    }
-    if (points.isEmpty) return [];
-    points.sort((a, b) => a.date.compareTo(b.date));
-    final Map<int, HistoricalPoint> byYear = {};
-    for (final point in points) {
-      byYear[point.date.year] = point;
-    }
-    final yearly = byYear.values.toList()..sort((a, b) => a.date.compareTo(b.date));
-    return yearly;
-  }
-
-  String _formatDate(DateTime date) {
-    final String mm = date.month.toString().padLeft(2, '0');
-    final String dd = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$mm-$dd';
-  }
-
   List<QuoteItem> _fallbackQuotes(Map<String, String> nameMap) {
     return nameMap.entries
         .map((entry) => QuoteItem(
@@ -592,36 +466,6 @@ class ApiService {
     _listingCache = listings;
     _listingCacheTime = DateTime.now();
     return listings;
-  }
-
-  Future<List<PeerCompany>> fetchPeerCompanies(String sector) async {
-    if (sector.isEmpty) return [];
-    if (_useProxy) {
-      final uri = Uri.parse('$_proxyBase/market/peers').replace(queryParameters: {'sector': sector});
-      final response = await http.get(uri);
-      if (response.statusCode != 200) {
-        throw Exception('Proxy peers error: ${response.statusCode}');
-      }
-      final dynamic data = jsonDecode(response.body);
-      if (data is List) {
-        return data.map((item) => PeerCompany.fromFmp(item)).toList();
-      }
-      return [];
-    }
-    final uri = Uri.parse('$_fmpStableBase/stock-screener').replace(queryParameters: {
-      'sector': sector,
-      'limit': '20',
-      'apikey': AppSecrets.fmpApiKey,
-    });
-    final response = await http.get(uri, headers: _fmpHeaders());
-    if (response.statusCode != 200) {
-      throw Exception('FMP peers error: ${response.statusCode}');
-    }
-    final dynamic data = jsonDecode(response.body);
-    if (data is List) {
-      return data.map((item) => PeerCompany.fromFmp(item)).toList();
-    }
-    return [];
   }
 
   List<CompanySearchItem> _parseListingsCsv(String csv) {
@@ -797,7 +641,15 @@ class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
   void _openDashboard(BuildContext context) {
-    Navigator.of(context).pushReplacement(AppNavigation.routeTo(const DashboardScreen()));
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 600),
+        pageBuilder: (_, animation, __) => FadeTransition(
+          opacity: animation,
+          child: const DashboardScreen(),
+        ),
+      ),
+    );
   }
 
   @override
@@ -838,30 +690,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ApiService _api = ApiService();
   late Future<DashboardData> _dataFuture;
   static const List<String> _featuredSymbols = ['AAPL', 'MSFT', 'TSLA', 'NVDA', 'BLK'];
-  static const List<MarketTickerSpec> _macroSpecs = [
-    MarketTickerSpec(label: 'NASDAQ', symbol: '^IXIC'),
-    MarketTickerSpec(label: 'Bitcoin', symbol: 'BTCUSD'),
-    MarketTickerSpec(label: 'EU 50', symbol: '^STOXX50E'),
-    MarketTickerSpec(label: 'VIX', symbol: '^VIX'),
-    MarketTickerSpec(label: 'Japan 225', symbol: '^N225'),
-    MarketTickerSpec(label: 'USA 30', symbol: '^DJI'),
-    MarketTickerSpec(label: 'UK 100', symbol: '^FTSE'),
-    MarketTickerSpec(label: 'GBP/USD', symbol: 'GBPUSD'),
-    MarketTickerSpec(label: 'EUR/USD', symbol: 'EURUSD'),
-    MarketTickerSpec(label: 'USA 500', symbol: '^GSPC'),
-    MarketTickerSpec(label: 'Crude Oil', symbol: 'CLUSD'),
-    MarketTickerSpec(label: 'USA Tech 100', symbol: '^NDX'),
-    MarketTickerSpec(label: 'Silver', symbol: 'XAGUSD'),
-    MarketTickerSpec(label: 'Gold', symbol: 'XAUUSD'),
-    MarketTickerSpec(label: 'Natural Gas', symbol: 'NGUSD'),
-  ];
-  final List<ChecklistItemData> _checklist = [
-    ChecklistItemData(label: 'Review revenue growth', detail: 'Compare YoY and QoQ trends'),
-    ChecklistItemData(label: 'Check profit margins', detail: 'Gross + operating margin shifts'),
-    ChecklistItemData(label: 'Scan cash flow', detail: 'Free cash flow consistency'),
-    ChecklistItemData(label: 'Compare valuation', detail: 'P/E vs sector median'),
-    ChecklistItemData(label: 'Read latest earnings', detail: 'Guidance + call highlights'),
-  ];
 
   @override
   void initState() {
@@ -873,40 +701,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!AppSecrets.isReady) {
       throw Exception('Missing API keys');
     }
-    final featuredFuture = _api.fetchQuotes(_featuredSymbols);
-    final macroFuture = _api.fetchQuotes(_macroSpecs.map((e) => e.symbol).toList());
-    final eventsFuture = _api.fetchUpcomingEvents();
-    final historyFuture = _api.fetchHistoricalSeries(
-      symbol: '^IXIC',
-      from: '1971-01-01',
-      to: _formatDate(DateTime.now()),
-    );
-    final featured = await featuredFuture;
-    List<QuoteItem> macro = [];
-    List<CalendarEvent> events = [];
-    List<HistoricalPoint> history = [];
-    try {
-      macro = await macroFuture;
-    } catch (_) {
-      macro = [];
-    }
-    try {
-      events = await eventsFuture;
-    } catch (_) {
-      events = [];
-    }
-    try {
-      history = await historyFuture;
-    } catch (_) {
-      history = [];
-    }
-    List<NewsArticle> news = [];
-    try {
-      news = await _api.fetchTopNews();
-    } catch (_) {
-      news = [];
-    }
-    return DashboardData(featured: featured, news: news, macro: macro, events: events, history: history);
+    final featured = await _api.fetchQuotes(_featuredSymbols);
+    return DashboardData(featured: featured);
   }
 
   @override
@@ -932,9 +728,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 24),
               Expanded(
-                  child: FutureBuilder<DashboardData>(
-                    future: _dataFuture,
-                    builder: (context, snapshot) {
+                child: FutureBuilder<DashboardData>(
+                  future: _dataFuture,
+                  builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     }
@@ -964,76 +760,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       );
                     }
                     final data = snapshot.data!;
-                    final summary = _buildMarketSummary(data.featured);
-                    final newsPreview = data.news.take(2).toList();
-                    final macroMap = {
-                      for (final item in data.macro) item.symbol.toUpperCase(): item,
-                    };
                     return LayoutBuilder(
                       builder: (context, constraints) {
-                        final double width = constraints.maxWidth;
-                        final int columns = width >= 1300 ? 3 : (width >= 900 ? 2 : 1);
-                        final double aspect = columns == 3 ? 1.45 : (columns == 2 ? 1.3 : 1.15);
+                        final bool isWide = constraints.maxWidth >= 1100;
                         return GridView.count(
-                          crossAxisCount: columns,
-                          mainAxisSpacing: 16,
-                          crossAxisSpacing: 16,
-                          childAspectRatio: aspect,
+                          crossAxisCount: isWide ? 2 : 1,
+                          mainAxisSpacing: 20,
+                          crossAxisSpacing: 20,
+                          childAspectRatio: isWide ? 1.15 : 1.1,
                           physics: const BouncingScrollPhysics(),
                           cacheExtent: 800,
                           children: [
                             DashboardPanel(
-                              title: 'Quick Actions',
-                              child: QuickActionsPanel(
-                                featured: data.featured,
-                                summary: summary,
-                                news: newsPreview,
-                                onNews: () => AppNavigation.go(context, 1),
-                                onCompanies: () => AppNavigation.go(context, 2),
-                                onSaved: () => AppNavigation.go(context, 3),
+                              title: 'Market Snapshot',
+                              child: FeaturedCard(
+                                title: '',
+                                subtitle: '',
+                                items: data.featured,
+                                compact: true,
                               ),
                             ),
                             DashboardPanel(
-                              title: 'Checklist',
-                              child: ChecklistPanel(
-                                items: _checklist,
-                                onToggle: (index, value) {
-                                  setState(() {
-                                    _checklist[index] = _checklist[index].copyWith(done: value);
-                                  });
-                                },
+                              title: 'Live Search',
+                              child: Text(
+                                'Search any company to see real-time quotes and detailed fundamentals.',
+                                style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
                             DashboardPanel(
-                              title: 'Watchlist Preview',
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (data.featured.isNotEmpty) MiniWatchRow(item: data.featured[0]),
-                                  if (data.featured.length > 1) MiniWatchRow(item: data.featured[1]),
-                                  if (data.featured.length > 2) MiniWatchRow(item: data.featured[2]),
-                                  if (data.featured.length > 3) MiniWatchRow(item: data.featured[3]),
-                                ],
+                              title: 'Company News',
+                              child: Text(
+                                'Tap News for the latest business headlines and company updates.',
+                                style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
                             DashboardPanel(
-                              title: 'Global Markets',
-                              child: Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: _macroSpecs.map((spec) {
-                                  final QuoteItem? item = macroMap[spec.symbol.toUpperCase()];
-                                  return MarketChip(spec: spec, item: item);
-                                }).toList(),
+                              title: 'Saved List',
+                              child: Text(
+                                'Save companies to build a personalized watchlist.',
+                                style: Theme.of(context).textTheme.bodyMedium,
                               ),
-                            ),
-                            DashboardPanel(
-                              title: 'Upcoming Events',
-                              child: UpcomingEventsPanel(events: data.events),
-                            ),
-                            DashboardPanel(
-                              title: 'Long-term Trend',
-                              child: TrendPanel(points: data.history),
                             ),
                           ],
                         );
@@ -1053,33 +819,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (error == null) return 'Unknown error.';
     final String message = error.toString();
     return message.replaceAll('Exception: ', '');
-  }
-
-  String _formatDate(DateTime date) {
-    final String mm = date.month.toString().padLeft(2, '0');
-    final String dd = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$mm-$dd';
-  }
-
-  MarketSummary _buildMarketSummary(List<QuoteItem> items) {
-    if (items.isEmpty) {
-      return MarketSummary.empty();
-    }
-    final sorted = [...items]..sort((a, b) => b.changesPercentage.compareTo(a.changesPercentage));
-    final top = sorted.first;
-    final bottom = sorted.last;
-    final secondary = sorted.length > 2 ? sorted[1] : null;
-    final avg = items.map((e) => e.changesPercentage).reduce((a, b) => a + b) / items.length;
-    final advancers = items.where((e) => e.changesPercentage >= 0).length;
-    final decliners = items.length - advancers;
-    return MarketSummary(
-      avgChange: '${avg.toStringAsFixed(2)}%',
-      advancers: advancers,
-      decliners: decliners,
-      topMover: top,
-      bottomMover: bottom,
-      secondaryMover: secondary,
-    );
   }
 }
 
@@ -1337,12 +1076,8 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
         });
       } else {
         final items = await _api.searchCompanies(query.trim());
-        final filtered = items.where((item) {
-          final ex = item.exchange.toUpperCase();
-          return ex.contains('NYSE') || ex.contains('LSE') || ex.contains('LONDON');
-        }).toList();
         setState(() {
-          _results = filtered.isNotEmpty ? filtered : items;
+          _results = items;
         });
       }
     } catch (err) {
@@ -1597,27 +1332,14 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
     final symbols = _resolveSymbols(widget.symbol);
     CompanyProfile? profile;
     CompanyQuote? quote;
-    List<PeerCompany> peers = [];
     for (final symbol in symbols) {
       profile ??= await _api.fetchCompanyProfile(symbol);
       quote ??= await _api.fetchQuote(symbol);
       if (profile != null && quote != null) {
-        try {
-          peers = await _api.fetchPeerCompanies(profile.sector);
-        } catch (_) {
-          peers = [];
-        }
-        return CompanyDetailData(profile: profile, quote: quote, symbol: symbol, peers: peers);
+        return CompanyDetailData(profile: profile, quote: quote, symbol: symbol);
       }
     }
-    if (profile != null) {
-      try {
-        peers = await _api.fetchPeerCompanies(profile.sector);
-      } catch (_) {
-        peers = [];
-      }
-    }
-    return CompanyDetailData(profile: profile, quote: quote, symbol: symbols.first, peers: peers);
+    return CompanyDetailData(profile: profile, quote: quote, symbol: symbols.first);
   }
 
   List<String> _resolveSymbols(String symbol) {
@@ -1632,61 +1354,6 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
       return ['BRK.B', 'BRK-B', 'BRKB'];
     }
     return [symbol];
-  }
-
-  double _positionInRange({required double price, required double low, required double high}) {
-    if (high <= low) return 0.5;
-    return ((price - low) / (high - low)).clamp(0, 1);
-  }
-
-  double _healthScore(CompanyProfile profile, CompanyQuote? quote, double? sectorPeMedian) {
-    double score = 0;
-    // Profitability
-    if (profile.eps > 0) score += 20;
-    // Valuation vs sector median
-    if (profile.pe > 0 && sectorPeMedian != null && sectorPeMedian > 0) {
-      final ratio = (sectorPeMedian / profile.pe).clamp(0.5, 1.5);
-      score += 20 * ((ratio - 0.5) / 1.0);
-    }
-    // Price location within 52-week range
-    if (quote != null && profile.yearHigh > 0 && profile.yearLow > 0) {
-      final pos = _positionInRange(price: quote.price, low: profile.yearLow, high: profile.yearHigh);
-      score += (1 - (pos - 0.5).abs() * 2) * 20;
-    } else {
-      score += 10;
-    }
-    // Market cap stability
-    if (profile.marketCap >= 200000000000) {
-      score += 20;
-    } else if (profile.marketCap >= 50000000000) {
-      score += 15;
-    } else if (profile.marketCap >= 10000000000) {
-      score += 10;
-    } else if (profile.marketCap > 0) {
-      score += 6;
-    }
-    // Volatility proxy
-    if (quote != null) {
-      final change = quote.changesPercentage.abs();
-      score += (change <= 1 ? 20 : (change <= 2.5 ? 12 : 6));
-    } else {
-      score += 8;
-    }
-    return score.clamp(0, 100);
-  }
-
-  String _scoreLabel(double score) {
-    if (score >= 75) return 'Strong';
-    if (score >= 55) return 'Balanced';
-    return 'Cautious';
-  }
-
-  double? _medianPe(List<PeerCompany> peers) {
-    final values = peers.map((e) => e.pe).where((v) => v > 0).toList()..sort();
-    if (values.isEmpty) return null;
-    final mid = values.length ~/ 2;
-    if (values.length.isOdd) return values[mid];
-    return (values[mid - 1] + values[mid]) / 2;
   }
 
   @override
@@ -1710,9 +1377,6 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
               final data = snapshot.data!;
               final profile = data.profile;
               final quote = data.quote;
-              final peers = data.peers;
-              final sectorMedianPe = peers.isNotEmpty ? _medianPe(peers) : null;
-              final healthScore = profile == null ? null : _healthScore(profile, quote, sectorMedianPe);
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1808,46 +1472,11 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                             Text(profile?.description ?? 'No description available.', style: Theme.of(context).textTheme.bodyMedium),
                             const SizedBox(height: 16),
                             if (profile != null) ...[
-                              HealthScorePanel(
-                                score: healthScore ?? 0,
-                                label: _scoreLabel(healthScore ?? 0),
-                              ),
-                              const SizedBox(height: 12),
-                              PeerComparisonPanel(
-                                profile: profile,
-                                quote: quote,
-                                sectorMedianPe: sectorMedianPe,
-                                peersCount: peers.where((p) => p.pe > 0).length,
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            if (profile != null) ...[
-                              InfoRow(
-                                label: 'Market Cap',
-                                value: _formatLarge(profile.marketCap),
-                                help: 'Total market value of all outstanding shares.',
-                              ),
-                              InfoRow(
-                                label: 'P/E Ratio',
-                                value: profile.pe.toStringAsFixed(2),
-                                help: 'Price to earnings ratio. Lower can mean cheaper relative to earnings.',
-                              ),
-                              InfoRow(
-                                label: 'EPS',
-                                value: profile.eps.toStringAsFixed(2),
-                                help: 'Earnings per share. Higher suggests stronger profitability.',
-                              ),
-                              InfoRow(
-                                label: '52W Range',
-                                value: '${profile.yearLow.toStringAsFixed(2)} - ${profile.yearHigh.toStringAsFixed(2)}',
-                                help: 'Lowest and highest price over the last 52 weeks.',
-                              ),
-                              if (profile.website.isNotEmpty)
-                                InfoRow(
-                                  label: 'Website',
-                                  value: profile.website,
-                                  help: 'Official company website.',
-                                ),
+                              InfoRow(label: 'Market Cap', value: _formatLarge(profile.marketCap)),
+                              InfoRow(label: 'PE Ratio', value: profile.pe.toStringAsFixed(2)),
+                              InfoRow(label: 'EPS', value: profile.eps.toStringAsFixed(2)),
+                              InfoRow(label: '52W Range', value: '${profile.yearLow.toStringAsFixed(2)} - ${profile.yearHigh.toStringAsFixed(2)}'),
+                              if (profile.website.isNotEmpty) InfoRow(label: 'Website', value: profile.website),
                             ],
                             if (quote != null && profile == null) ...[
                               InfoRow(label: 'Latest Price', value: '\$${quote.price.toStringAsFixed(2)}'),
@@ -1882,12 +1511,11 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
 }
 
 class CompanyDetailData {
-  CompanyDetailData({required this.profile, required this.quote, required this.symbol, required this.peers});
+  CompanyDetailData({required this.profile, required this.quote, required this.symbol});
 
   final CompanyProfile? profile;
   final CompanyQuote? quote;
   final String symbol;
-  final List<PeerCompany> peers;
 }
 
 class SavedCompaniesScreen extends StatelessWidget {
@@ -2144,26 +1772,8 @@ class AppNavigation {
       default:
         target = const DashboardScreen();
     }
-    Navigator.of(context).pushReplacement(routeTo(target));
-  }
-
-  static PageRouteBuilder<void> routeTo(Widget target) {
-    return PageRouteBuilder<void>(
-      transitionDuration: const Duration(milliseconds: 220),
-      reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, __, ___) => target,
-      transitionsBuilder: (_, animation, __, child) {
-        final offset = Tween<Offset>(begin: const Offset(0.02, 0), end: Offset.zero).animate(
-          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-        );
-        final fade = Tween<double>(begin: 0, end: 1).animate(
-          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-        );
-        return FadeTransition(
-          opacity: fade,
-          child: SlideTransition(position: offset, child: child),
-        );
-      },
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => target),
     );
   }
 }
@@ -2278,7 +1888,9 @@ class SideRail extends StatelessWidget {
           LogoButton(
             size: 48,
             onTap: () {
-              Navigator.of(context).pushReplacement(AppNavigation.routeTo(const SplashScreen()));
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const SplashScreen()),
+              );
             },
           ),
           const SizedBox(height: 18),
@@ -2620,19 +2232,9 @@ class MarketItem {
 }
 
 class DashboardData {
-  DashboardData({
-    required this.featured,
-    required this.news,
-    required this.macro,
-    required this.events,
-    required this.history,
-  });
+  DashboardData({required this.featured});
 
   final List<QuoteItem> featured;
-  final List<NewsArticle> news;
-  final List<QuoteItem> macro;
-  final List<CalendarEvent> events;
-  final List<HistoricalPoint> history;
 }
 
 class NewsArticle {
@@ -2821,29 +2423,6 @@ class CompanyProfile {
   }
 }
 
-class PeerCompany {
-  PeerCompany({required this.symbol, required this.companyName, required this.sector, required this.pe});
-
-  final String symbol;
-  final String companyName;
-  final String sector;
-  final double pe;
-
-  factory PeerCompany.fromFmp(Map<String, dynamic> json) {
-    double parseNum(dynamic value) {
-      if (value is num) return value.toDouble();
-      return double.tryParse(value?.toString() ?? '') ?? 0;
-    }
-
-    return PeerCompany(
-      symbol: json['symbol']?.toString() ?? '',
-      companyName: json['companyName']?.toString() ?? json['name']?.toString() ?? '',
-      sector: json['sector']?.toString() ?? '',
-      pe: parseNum(json['pe']),
-    );
-  }
-}
-
 class CompanyQuote {
   CompanyQuote({
     required this.price,
@@ -2993,913 +2572,6 @@ class DashboardPanel extends StatelessWidget {
   }
 }
 
-class MarketSummary {
-  MarketSummary({
-    required this.avgChange,
-    required this.advancers,
-    required this.decliners,
-    required this.topMover,
-    required this.bottomMover,
-    required this.secondaryMover,
-  });
-
-  final String avgChange;
-  final int advancers;
-  final int decliners;
-  final QuoteItem topMover;
-  final QuoteItem bottomMover;
-  final QuoteItem? secondaryMover;
-
-  factory MarketSummary.empty() {
-    final empty = QuoteItem(
-      symbol: '--',
-      name: 'No data',
-      price: 0,
-      change: 0,
-      changesPercentage: 0,
-      volume: 0,
-      isLive: false,
-    );
-    return MarketSummary(
-      avgChange: '0.00%',
-      advancers: 0,
-      decliners: 0,
-      topMover: empty,
-      bottomMover: empty,
-      secondaryMover: null,
-    );
-  }
-
-  String get topSymbol => topMover.symbol;
-}
-
-class MetricRow extends StatelessWidget {
-  const MetricRow({super.key, required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-          const Spacer(),
-          Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-class MiniMoverRow extends StatelessWidget {
-  const MiniMoverRow({super.key, required this.item});
-
-  final QuoteItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color color = item.changesPercentage >= 0 ? const Color(0xFF41D07B) : Colors.redAccent;
-    return Row(
-      children: [
-        Expanded(
-          child: Text(item.symbol, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-        ),
-        Text(
-          '${item.changesPercentage.toStringAsFixed(2)}%',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: item.isLive ? color : scheme.onSurface.withOpacity(0.5)),
-        ),
-      ],
-    );
-  }
-}
-
-enum QuickActionView { news, companies, saved }
-
-class QuickActionsPanel extends StatefulWidget {
-  const QuickActionsPanel({
-    super.key,
-    required this.featured,
-    required this.summary,
-    required this.news,
-    required this.onNews,
-    required this.onCompanies,
-    required this.onSaved,
-  });
-
-  final List<QuoteItem> featured;
-  final MarketSummary summary;
-  final List<NewsArticle> news;
-  final VoidCallback onNews;
-  final VoidCallback onCompanies;
-  final VoidCallback onSaved;
-
-  @override
-  State<QuickActionsPanel> createState() => _QuickActionsPanelState();
-}
-
-class _QuickActionsPanelState extends State<QuickActionsPanel> {
-  QuickActionView _selected = QuickActionView.news;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final preview = widget.news.take(3).toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            GlassPill(
-              label: 'News',
-              selected: _selected == QuickActionView.news,
-              onTap: () => setState(() => _selected = QuickActionView.news),
-            ),
-            GlassPill(
-              label: 'Companies',
-              selected: _selected == QuickActionView.companies,
-              onTap: () => setState(() => _selected = QuickActionView.companies),
-            ),
-            GlassPill(
-              label: 'Saved',
-              selected: _selected == QuickActionView.saved,
-              onTap: () => setState(() => _selected = QuickActionView.saved),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: _QuickSection(
-              title: _sectionTitle(),
-              child: Column(
-                children: [
-                  if (_selected == QuickActionView.news)
-                    preview.isEmpty
-                        ? Text(
-                            'No headlines yet. Tap refresh in News.',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurface.withOpacity(0.65),
-                                ),
-                          )
-                        : Column(
-                            children: [
-                              MiniNewsRow(article: preview[0]),
-                              if (preview.length > 1) MiniNewsRow(article: preview[1]),
-                              if (preview.length > 2) MiniNewsRow(article: preview[2]),
-                            ],
-                          ),
-                  if (_selected == QuickActionView.companies)
-                    Column(
-                      children: [
-                        if (widget.featured.isNotEmpty) MiniQuoteRow(item: widget.featured[0]),
-                        if (widget.featured.length > 1) MiniQuoteRow(item: widget.featured[1]),
-                        if (widget.featured.length > 2) MiniQuoteRow(item: widget.featured[2]),
-                        const SizedBox(height: 10),
-                        MiniMoverRow(item: widget.summary.topMover),
-                        const SizedBox(height: 6),
-                        MiniMoverRow(item: widget.summary.bottomMover),
-                      ],
-                    ),
-                  if (_selected == QuickActionView.saved)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Your saved companies will appear here.',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurface.withOpacity(0.7),
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Pin tickers you want to track daily.',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurface.withOpacity(0.55),
-                              ),
-                        ),
-                      ],
-                    ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: GlassPill(
-                      label: _ctaLabel(),
-                      selected: true,
-                      onTap: _ctaAction(),
-                      compact: true,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _sectionTitle() {
-    switch (_selected) {
-      case QuickActionView.news:
-        return 'Latest News';
-      case QuickActionView.companies:
-        return 'Company Snapshot';
-      case QuickActionView.saved:
-        return 'Saved Watchlist';
-    }
-  }
-
-  String _ctaLabel() {
-    switch (_selected) {
-      case QuickActionView.news:
-        return 'Go to News';
-      case QuickActionView.companies:
-        return 'Go to Companies';
-      case QuickActionView.saved:
-        return 'Go to Saved';
-    }
-  }
-
-  VoidCallback _ctaAction() {
-    switch (_selected) {
-      case QuickActionView.news:
-        return widget.onNews;
-      case QuickActionView.companies:
-        return widget.onCompanies;
-      case QuickActionView.saved:
-        return widget.onSaved;
-    }
-  }
-}
-
-class _QuickSection extends StatelessWidget {
-  const _QuickSection({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurface.withOpacity(0.8),
-                ),
-          ),
-          const SizedBox(height: 6),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class MiniQuoteRow extends StatelessWidget {
-  const MiniQuoteRow({super.key, required this.item});
-
-  final QuoteItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color color = item.changesPercentage >= 0 ? const Color(0xFF41D07B) : Colors.redAccent;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(item.symbol, style: Theme.of(context).textTheme.bodySmall),
-          ),
-          Text(
-            item.isLive ? '\$${item.price.toStringAsFixed(2)}' : '--',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.8)),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            item.isLive ? '${item.changesPercentage.toStringAsFixed(2)}%' : '--',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: item.isLive ? color : scheme.onSurface.withOpacity(0.5)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class MiniNewsRow extends StatelessWidget {
-  const MiniNewsRow({super.key, required this.article});
-
-  final NewsArticle article;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: article.url.isNotEmpty ? () => _launchExternal(article.url) : null,
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      article.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${article.source} · ${article.publishedAt}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.6)),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.open_in_new, size: 16),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class ChecklistItemData {
-  const ChecklistItemData({required this.label, required this.detail, this.done = false});
-
-  final String label;
-  final String detail;
-  final bool done;
-
-  ChecklistItemData copyWith({bool? done}) {
-    return ChecklistItemData(label: label, detail: detail, done: done ?? this.done);
-  }
-}
-
-class ChecklistPanel extends StatelessWidget {
-  const ChecklistPanel({super.key, required this.items, required this.onToggle});
-
-  final List<ChecklistItemData> items;
-  final void Function(int index, bool value) onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return ListView.separated(
-      physics: const BouncingScrollPhysics(),
-      padding: EdgeInsets.zero,
-      itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-          decoration: BoxDecoration(
-            color: scheme.surface.withOpacity(0.35),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-          ),
-          child: Row(
-            children: [
-              Checkbox(
-                value: item.done,
-                onChanged: (value) => onToggle(index, value ?? false),
-                activeColor: scheme.primary,
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.label,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.detail,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.6)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-enum CalendarEventType { economic, earnings }
-
-class CalendarEvent {
-  CalendarEvent({
-    required this.date,
-    required this.title,
-    required this.subtitle,
-    required this.type,
-  });
-
-  final DateTime date;
-  final String title;
-  final String subtitle;
-  final CalendarEventType type;
-
-  factory CalendarEvent.fromMap(Map<String, dynamic> json, {required CalendarEventType type}) {
-    final dateRaw = json['date']?.toString() ?? json['datetime']?.toString() ?? json['publishedDate']?.toString() ?? '';
-    final date = DateTime.tryParse(dateRaw) ?? DateTime.now();
-    if (type == CalendarEventType.earnings) {
-      final symbol = json['symbol']?.toString() ?? json['ticker']?.toString() ?? '';
-      final name = json['company']?.toString() ?? json['companyName']?.toString() ?? json['name']?.toString() ?? '';
-      final time = json['time']?.toString() ?? json['epsTime']?.toString() ?? '';
-      final title = name.isNotEmpty ? name : (symbol.isNotEmpty ? symbol : 'Earnings');
-      final subtitleParts = <String>[];
-      if (symbol.isNotEmpty && title != symbol) subtitleParts.add(symbol);
-      if (time.isNotEmpty) subtitleParts.add(time);
-      return CalendarEvent(
-        date: date,
-        title: title,
-        subtitle: subtitleParts.join(' · '),
-        type: type,
-      );
-    }
-    final event = json['event']?.toString() ?? json['eventName']?.toString() ?? json['name']?.toString() ?? 'Economic Event';
-    final country = json['country']?.toString() ?? json['countryCode']?.toString() ?? '';
-    final impact = json['impact']?.toString() ?? json['importance']?.toString() ?? '';
-    final subtitle = [country, impact].where((part) => part.isNotEmpty).join(' · ');
-    return CalendarEvent(date: date, title: event, subtitle: subtitle, type: type);
-  }
-}
-
-class HistoricalPoint {
-  const HistoricalPoint({required this.date, required this.value});
-
-  final DateTime date;
-  final double value;
-}
-
-class UpcomingEventsPanel extends StatelessWidget {
-  const UpcomingEventsPanel({super.key, required this.events});
-
-  final List<CalendarEvent> events;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    if (events.isEmpty) {
-      return Text(
-        'No upcoming events available.',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.6)),
-      );
-    }
-    return ListView.separated(
-      padding: EdgeInsets.zero,
-      physics: const BouncingScrollPhysics(),
-      itemCount: events.length.clamp(0, 8),
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final event = events[index];
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: scheme.surface.withOpacity(0.35),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-          ),
-          child: Row(
-            children: [
-              _EventDateBadge(date: event.date),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      event.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    if (event.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        event.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.6)),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              _EventTypePill(type: event.type),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _EventDateBadge extends StatelessWidget {
-  const _EventDateBadge({required this.date});
-
-  final DateTime date;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final month = _shortMonth(date.month);
-    return Container(
-      width: 44,
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: scheme.primary.withOpacity(0.18),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.primary.withOpacity(0.25)),
-      ),
-      child: Column(
-        children: [
-          Text(
-            month,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            date.day.toString(),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EventTypePill extends StatelessWidget {
-  const _EventTypePill({required this.type});
-
-  final CalendarEventType type;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool isEarnings = type == CalendarEventType.earnings;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: (isEarnings ? scheme.secondary : scheme.primary).withOpacity(0.18),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: scheme.onSurface.withOpacity(0.15)),
-      ),
-      child: Text(
-        isEarnings ? 'Earnings' : 'Macro',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-}
-
-class TrendPanel extends StatelessWidget {
-  const TrendPanel({super.key, required this.points});
-
-  final List<HistoricalPoint> points;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    if (points.length < 2) {
-      return Text(
-        'Trend data not available yet.',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.6)),
-      );
-    }
-    final last = points.last;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'NASDAQ (Yearly)',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.7)),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          _formatCompactPrice(last.value),
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 140,
-          width: double.infinity,
-          child: CustomPaint(
-            painter: TrendChartPainter(points: points, color: scheme.primary),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              points.first.date.year.toString(),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.5)),
-            ),
-            Text(
-              points.last.date.year.toString(),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.5)),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class TrendChartPainter extends CustomPainter {
-  TrendChartPainter({required this.points, required this.color});
-
-  final List<HistoricalPoint> points;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final values = points.map((e) => e.value).toList();
-    final double minVal = values.reduce((a, b) => a < b ? a : b);
-    final double maxVal = values.reduce((a, b) => a > b ? a : b);
-    final double range = (maxVal - minVal).abs() < 0.0001 ? 1 : (maxVal - minVal);
-    final double dx = size.width / (points.length - 1);
-
-    final Path line = Path();
-    for (int i = 0; i < points.length; i++) {
-      final point = points[i];
-      final double norm = (point.value - minVal) / range;
-      final double x = dx * i;
-      final double y = size.height - (norm * size.height);
-      if (i == 0) {
-        line.moveTo(x, y);
-      } else {
-        line.lineTo(x, y);
-      }
-    }
-
-    final Paint fillPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          color.withOpacity(0.2),
-          color.withOpacity(0.02),
-        ],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..style = PaintingStyle.fill;
-
-    final Path fill = Path.from(line)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-
-    final Paint stroke = Paint()
-      ..color = color.withOpacity(0.9)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-
-    canvas.drawPath(fill, fillPaint);
-    canvas.drawPath(line, stroke);
-  }
-
-  @override
-  bool shouldRepaint(covariant TrendChartPainter oldDelegate) {
-    return oldDelegate.points != points || oldDelegate.color != color;
-  }
-}
-
-class MarketTickerSpec {
-  const MarketTickerSpec({required this.label, required this.symbol});
-
-  final String label;
-  final String symbol;
-}
-
-class MarketChip extends StatelessWidget {
-  const MarketChip({super.key, required this.spec, required this.item});
-
-  final MarketTickerSpec spec;
-  final QuoteItem? item;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final QuoteItem? data = item;
-    final bool live = data?.isLive == true;
-    final double change = data?.changesPercentage ?? 0;
-    final Color changeColor = change >= 0 ? const Color(0xFF41D07B) : Colors.redAccent;
-    final String price = live ? _formatCompactPrice(data?.price ?? 0) : '--';
-    final String pct = live ? '${change.toStringAsFixed(2)}%' : '--';
-    return _InteractiveGlass(
-      onTap: data == null ? null : () => _showMarketDetails(context, spec, data),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: scheme.surface.withOpacity(0.45),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: scheme.onSurface.withOpacity(0.1)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              spec.label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: scheme.onSurface.withOpacity(0.75),
-                  ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              price,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              pct,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: live ? changeColor : scheme.onSurface.withOpacity(0.5)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InteractiveGlass extends StatefulWidget {
-  const _InteractiveGlass({required this.child, this.onTap});
-
-  final Widget child;
-  final VoidCallback? onTap;
-
-  @override
-  State<_InteractiveGlass> createState() => _InteractiveGlassState();
-}
-
-class _InteractiveGlassState extends State<_InteractiveGlass> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: widget.onTap == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _hovered ? 1.06 : 1.0,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: _hovered
-                  ? [
-                      BoxShadow(
-                        color: Theme.of(context).colorScheme.primary.withOpacity(0.18),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: widget.child,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-void _showMarketDetails(BuildContext context, MarketTickerSpec spec, QuoteItem item) {
-  showDialog<void>(
-    context: context,
-    builder: (_) {
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(24),
-        child: GlassPanel(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(spec.label, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                Text(item.symbol, style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 12),
-                InfoRow(label: 'Price', value: _formatCompactPrice(item.price)),
-                InfoRow(label: 'Change', value: '${item.change.toStringAsFixed(2)} (${item.changesPercentage.toStringAsFixed(2)}%)'),
-                InfoRow(label: 'Volume', value: item.volume > 0 ? item.volume.toStringAsFixed(0) : '--'),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
-}
-
-String _formatCompactPrice(double value) {
-  if (value.abs() >= 1000) {
-    return value.toStringAsFixed(0);
-  }
-  if (value.abs() >= 100) {
-    return value.toStringAsFixed(2);
-  }
-  if (value.abs() >= 1) {
-    return value.toStringAsFixed(4);
-  }
-  return value.toStringAsFixed(6);
-}
-
-String _shortMonth(int month) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  if (month < 1 || month > 12) return '';
-  return months[month - 1];
-}
-
-Future<void> _launchExternal(String url) async {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return;
-  await launchUrl(uri, mode: LaunchMode.externalApplication);
-}
-
-class MiniWatchRow extends StatelessWidget {
-  const MiniWatchRow({super.key, required this.item});
-
-  final QuoteItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              item.name,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Text(
-            item.isLive ? '\$${item.price.toStringAsFixed(2)}' : '--',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface.withOpacity(0.85)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _FrostedPill extends StatelessWidget {
   const _FrostedPill({required this.label, required this.tint});
 
@@ -3928,11 +2600,10 @@ class _FrostedPill extends StatelessWidget {
 }
 
 class InfoRow extends StatelessWidget {
-  const InfoRow({super.key, required this.label, required this.value, this.help});
+  const InfoRow({super.key, required this.label, required this.value});
 
   final String label;
   final String value;
-  final String? help;
 
   @override
   Widget build(BuildContext context) {
@@ -3941,164 +2612,9 @@ class InfoRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Row(
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.6))),
-              if (help != null) ...[
-                const SizedBox(width: 6),
-                Tooltip(
-                  message: help!,
-                  child: Icon(Icons.info_outline, size: 14, color: scheme.onSurface.withOpacity(0.5)),
-                ),
-              ],
-            ],
-          ),
+          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.6))),
           const Spacer(),
           Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-class HealthScorePanel extends StatelessWidget {
-  const HealthScorePanel({super.key, required this.score, required this.label});
-
-  final double score;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color color = score >= 75
-        ? const Color(0xFF41D07B)
-        : score >= 55
-            ? scheme.primary
-            : Colors.orangeAccent;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Company Health Score', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.7))),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Text(
-                score.toStringAsFixed(0),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(width: 8),
-              Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: color)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: score / 100,
-              minHeight: 6,
-              backgroundColor: scheme.onSurface.withOpacity(0.08),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class PeerComparisonPanel extends StatelessWidget {
-  const PeerComparisonPanel({
-    super.key,
-    required this.profile,
-    required this.quote,
-    required this.sectorMedianPe,
-    required this.peersCount,
-  });
-
-  final CompanyProfile profile;
-  final CompanyQuote? quote;
-  final double? sectorMedianPe;
-  final int peersCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final double pe = profile.pe;
-    final double? median = sectorMedianPe;
-    final double? peDelta = (pe > 0 && median != null && median > 0) ? ((pe / median) - 1) * 100 : null;
-    final double position = (quote != null && profile.yearHigh > 0 && profile.yearLow > 0)
-        ? ((quote!.price - profile.yearLow) / (profile.yearHigh - profile.yearLow)).clamp(0, 1)
-        : 0.5;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Peer Comparison', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurface.withOpacity(0.7))),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _MiniStat(
-                  label: 'P/E vs sector',
-                  value: peDelta == null ? '--' : '${peDelta >= 0 ? '+' : ''}${peDelta.toStringAsFixed(1)}%',
-                  caption: peersCount > 0 ? 'Median of $peersCount peers' : 'Median unavailable',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MiniStat(
-                  label: '52W position',
-                  value: '${(position * 100).toStringAsFixed(0)}%',
-                  caption: 'Low → High range',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({required this.label, required this.value, required this.caption});
-
-  final String label;
-  final String value;
-  final String caption;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.45),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.onSurface.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.6))),
-          const SizedBox(height: 4),
-          Text(value, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 2),
-          Text(caption, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface.withOpacity(0.5))),
         ],
       ),
     );
