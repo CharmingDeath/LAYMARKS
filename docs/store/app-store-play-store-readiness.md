@@ -121,6 +121,11 @@ Never change these after production launch.
 - [ ] Third-party API attribution/license obligations reviewed.
 - [ ] Confirm no copyrighted logos/content without rights.
 
+Starter pages created in repo:
+
+- `docs/legal/privacy-policy.md`
+- `docs/legal/support.md`
+
 ---
 
 ## E) Operational Readiness

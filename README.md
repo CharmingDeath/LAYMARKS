@@ -91,3 +91,8 @@ MIT
 - `docs/release/v0.1.1-checklist.md`
 - `docs/store/app-store-play-store-readiness.md`
 - `docs/store/play-internal-test-walkthrough.md`
+
+## Store Metadata Docs
+
+- Privacy Policy: `docs/legal/privacy-policy.md`
+- Support Page: `docs/legal/support.md`
