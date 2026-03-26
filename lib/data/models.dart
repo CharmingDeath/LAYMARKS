@@ -280,7 +280,8 @@ class CompanyQuote {
   factory CompanyQuote.fromFmp(Map<String, dynamic> json) {
     double parseNum(dynamic value) {
       if (value is num) return value.toDouble();
-      return double.tryParse(value?.toString() ?? '') ?? 0;
+      final text = (value?.toString() ?? '').replaceAll('%', '');
+      return double.tryParse(text) ?? 0;
     }
 
     return CompanyQuote(
@@ -333,7 +334,8 @@ class QuoteItem {
   factory QuoteItem.fromFmp(Map<String, dynamic> json) {
     double parseNum(dynamic value) {
       if (value is num) return value.toDouble();
-      return double.tryParse(value?.toString() ?? '') ?? 0;
+      final text = (value?.toString() ?? '').replaceAll('%', '');
+      return double.tryParse(text) ?? 0;
     }
 
     return QuoteItem(

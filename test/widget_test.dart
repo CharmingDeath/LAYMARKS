@@ -16,7 +16,7 @@ void main() {
 
   testWidgets('app boot smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const AppMineApp());
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.text('LAYMARKS'), findsOneWidget);
   });

@@ -25,12 +25,14 @@ class AppMineApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = GoogleFonts.interTextTheme();
+    final lightTextTheme = GoogleFonts.interTextTheme();
+    final darkBase = ThemeData(brightness: Brightness.dark).textTheme;
+    final darkTextTheme = GoogleFonts.interTextTheme(darkBase);
     return MaterialApp(
       title: 'LAYMARKS',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3069E0)),
-        textTheme: textTheme,
+        textTheme: lightTextTheme,
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
@@ -39,7 +41,7 @@ class AppMineApp extends StatelessWidget {
           seedColor: const Color(0xFF3069E0),
           brightness: Brightness.dark,
         ),
-        textTheme: textTheme,
+        textTheme: darkTextTheme,
         useMaterial3: true,
       ),
       initialRoute: AppRoutes.splash,
@@ -239,7 +241,9 @@ class _FocusPanel extends StatelessWidget {
     final focus = data.focus;
     final profile = data.focusProfile;
     return GlassPanel(
-      child: ListView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Focus company',
@@ -264,7 +268,17 @@ class _FocusPanel extends StatelessWidget {
                   : profile.industry,
             ),
             const SizedBox(height: 4),
-            Text(profile.website.isEmpty ? '' : profile.website),
+            if (profile.website.isNotEmpty)
+              GestureDetector(
+                onTap: () => _openUrl(profile.website),
+                child: Text(
+                  profile.website,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
           ],
           const SizedBox(height: 18),
           Text(
@@ -310,6 +324,16 @@ class _FocusPanel extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _openUrl(String rawUrl) async {
+    Uri? uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return;
+    if (uri.scheme.isEmpty) {
+      uri = Uri.tryParse('https://${rawUrl.trim()}');
+      if (uri == null) return;
+    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }
 
@@ -669,7 +693,7 @@ class _SavedScreenState extends State<SavedScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              const TopBar(title: 'Saved / Watchlist Feed'),
+              const TopBar(title: 'Company News Feed'),
               const SizedBox(height: 14),
               Expanded(
                 child: FutureBuilder<List<NewsArticle>>(

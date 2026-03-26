@@ -34,6 +34,7 @@ This checklist tracks what is required to ship a production build of LAYMARKS.
 - [ ] Build and verify:
   - `flutter build appbundle --release`
   - `flutter build apk --release` (optional)
+  - (Expected) build fails early if `android/key.properties` is missing.
 
 ### 3) iOS signing + capabilities
 

@@ -66,28 +66,31 @@ class ResponsiveScaffold extends StatelessWidget {
         return Column(
           children: [
             Expanded(child: SafeArea(bottom: false, child: child)),
-            BottomNavigationBar(
-              currentIndex: selected,
-              onTap: (index) => AppNavigation.go(context, index),
-              type: BottomNavigationBarType.fixed,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.grid_view_rounded),
-                  label: 'Dashboard',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.newspaper_rounded),
-                  label: 'News',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.business_rounded),
-                  label: 'Companies',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.bookmark_border_rounded),
-                  label: 'Saved',
-                ),
-              ],
+            SafeArea(
+              top: false,
+              child: BottomNavigationBar(
+                currentIndex: selected,
+                onTap: (index) => AppNavigation.go(context, index),
+                type: BottomNavigationBarType.fixed,
+                items: const [
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.grid_view_rounded),
+                    label: 'Dashboard',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.newspaper_rounded),
+                    label: 'News',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.business_rounded),
+                    label: 'Companies',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.bookmark_border_rounded),
+                    label: 'Saved',
+                  ),
+                ],
+              ),
             ),
           ],
         );

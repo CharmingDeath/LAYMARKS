@@ -51,13 +51,14 @@ android {
 
     buildTypes {
         release {
-            // Use release signing when key.properties is present.
-            // Fallback keeps local release builds possible before keys are provisioned.
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Missing android/key.properties for release builds. " +
+                        "Copy android/key.properties.example to android/key.properties " +
+                        "and set your upload keystore values.",
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

@@ -96,6 +96,8 @@ flutter test
    flutter build apk --release
    ```
 
+   Note: release builds require `android/key.properties`; build will fail fast if missing.
+
 ### iOS bundle identifier and signing
 
 - iOS bundle identifier is set to `com.laymarks.app`
