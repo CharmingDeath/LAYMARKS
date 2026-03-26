@@ -19,9 +19,39 @@ const NEWSAPI_BASE = 'https://newsapi.org/v2';
 const ALPHAVANTAGE_BASE = 'https://www.alphavantage.co/query';
 
 const cache = new Map();
+const CACHE_MAX_ENTRIES = (() => {
+  const parsed = Number(process.env.CACHE_MAX_ENTRIES || 1000);
+  if (!Number.isFinite(parsed) || parsed < 100) {
+    return 1000;
+  }
+  return Math.floor(parsed);
+})();
+
+function evictExpiredEntries(maxRemovals = 100) {
+  const now = Date.now();
+  let removed = 0;
+  for (const [key, value] of cache.entries()) {
+    if (removed >= maxRemovals) break;
+    if (!value || now > value.expires) {
+      cache.delete(key);
+      removed += 1;
+    }
+  }
+}
 
 function setCache(key, data, ttlMs) {
+  // Refresh insertion order so repeated keys remain "recent".
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
   cache.set(key, { data, expires: Date.now() + ttlMs });
+  evictExpiredEntries(200);
+
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
 }
 
 function getCache(key) {
