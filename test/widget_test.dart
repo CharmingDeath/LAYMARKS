@@ -1,7 +1,7 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:appmine/main.dart';
+import 'package:laymarks/main.dart';
 
 void main() {
   setUpAll(() async {
