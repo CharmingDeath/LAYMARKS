@@ -148,3 +148,9 @@ Never change these after production launch.
 3. Update app display names and brand assets.
 4. Deploy proxy backend and set production `API_BASE_URL`.
 5. Prepare store metadata packs (descriptions, keywords, screenshots).
+
+## Command Walkthrough
+
+For an exact Android internal testing sequence, use:
+
+- `docs/store/play-internal-test-walkthrough.md`

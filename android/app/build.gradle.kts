@@ -48,12 +48,12 @@ android {
 
     buildTypes {
         release {
-            // Use release signing when configured; fallback to debug for local smoke builds.
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Missing android/key.properties for release build. Copy android/key.properties.example and fill keystore values."
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
