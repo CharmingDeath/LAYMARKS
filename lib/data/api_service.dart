@@ -5,11 +5,38 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 
 class AppSecrets {
-  static String get newsApiKey => dotenv.env['NEWSAPI_KEY'] ?? '';
-  static String get fmpApiKey => dotenv.env['FMP_API_KEY'] ?? '';
-  static String get marketauxKey => dotenv.env['MARKETAUX_API_KEY'] ?? '';
-  static String get alphaVantageKey => dotenv.env['ALPHAVANTAGE_API_KEY'] ?? '';
-  static String get apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
+  static String _envOrDotenv(
+    String key,
+    String compileTimeValue,
+  ) {
+    if (compileTimeValue.isNotEmpty) return compileTimeValue;
+    return dotenv.env[key] ?? '';
+  }
+
+  static String get newsApiKey => _envOrDotenv(
+        'NEWSAPI_KEY',
+        const String.fromEnvironment('NEWSAPI_KEY'),
+      );
+  static String get fmpApiKey => _envOrDotenv(
+        'FMP_API_KEY',
+        const String.fromEnvironment('FMP_API_KEY'),
+      );
+  static String get marketauxKey => _envOrDotenv(
+        'MARKETAUX_API_KEY',
+        const String.fromEnvironment('MARKETAUX_API_KEY'),
+      );
+  static String get alphaVantageKey => _envOrDotenv(
+        'ALPHAVANTAGE_API_KEY',
+        const String.fromEnvironment('ALPHAVANTAGE_API_KEY'),
+      );
+  static String get apiBaseUrl => _envOrDotenv(
+        'API_BASE_URL',
+        const String.fromEnvironment('API_BASE_URL'),
+      );
+  static String get proxyClientToken => _envOrDotenv(
+        'PROXY_CLIENT_TOKEN',
+        const String.fromEnvironment('PROXY_CLIENT_TOKEN'),
+      );
 
   static bool get isReady =>
       apiBaseUrl.isNotEmpty || (fmpApiKey.isNotEmpty && (marketauxKey.isNotEmpty || newsApiKey.isNotEmpty));
@@ -46,6 +73,7 @@ class ApiService {
   static final Map<String, DateTime> _historyCacheTime = {};
   static final Map<String, List<double>> _intradayCache = {};
   static final Map<String, DateTime> _intradayCacheTime = {};
+  static const Duration _requestTimeout = Duration(seconds: 20);
 
   void _throwIfAlphaError(Map<String, dynamic> data) {
     final String? note = data['Note']?.toString();
@@ -70,11 +98,21 @@ class ApiService {
     };
   }
 
+  Map<String, String> _proxyHeaders() {
+    final token = AppSecrets.proxyClientToken.trim();
+    if (token.isEmpty) return const {};
+    return {'authorization': 'Bearer $token'};
+  }
+
+  Future<http.Response> _get(Uri uri, {Map<String, String>? headers}) {
+    return http.get(uri, headers: headers).timeout(_requestTimeout);
+  }
+
   Future<List<NewsArticle>> fetchTopNews() async {
     final int page = _newsPageSeed();
     if (_useProxy) {
       final uri = Uri.parse('$_proxyBase/news/world').replace(queryParameters: {'page': '$page'});
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy news error: ${response.statusCode}');
       }
@@ -91,7 +129,7 @@ class ApiService {
         'filter_entities': 'true',
         'categories': 'business,finance',
       });
-      final response = await http.get(uri);
+      final response = await _get(uri);
       if (response.statusCode != 200) {
         throw Exception('Marketaux error: ${response.statusCode}');
       }
@@ -107,7 +145,7 @@ class ApiService {
       'page': '$page',
       'apiKey': AppSecrets.newsApiKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('NewsAPI error: ${response.statusCode}');
     }
@@ -122,7 +160,7 @@ class ApiService {
   Future<List<NewsArticle>> fetchCompanyNews() async {
     if (_useProxy) {
       final uri = Uri.parse('$_proxyBase/news/company');
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy company news error: ${response.statusCode}');
       }
@@ -151,7 +189,7 @@ class ApiService {
         }),
       ];
       for (final uri in candidates) {
-        final response = await http.get(uri, headers: _fmpHeaders());
+        final response = await _get(uri, headers: _fmpHeaders());
         if (response.statusCode != 200) {
           continue;
         }
@@ -175,7 +213,7 @@ class ApiService {
       'sortBy': 'publishedAt',
       'apiKey': AppSecrets.newsApiKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('NewsAPI error: ${response.statusCode}');
     }
@@ -193,7 +231,7 @@ class ApiService {
       final uri = Uri.parse('$_proxyBase/market/quote').replace(queryParameters: {
         'symbols': symbols.join(','),
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy quote error: ${response.statusCode}');
       }
@@ -209,7 +247,7 @@ class ApiService {
         'symbol': joined,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final dynamic decoded = jsonDecode(response.body);
         if (decoded is List && decoded.isNotEmpty) {
@@ -222,7 +260,7 @@ class ApiService {
       final uriV3 = Uri.parse('$_fmpV3Base/quote/$joined').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(uriV3, headers: _fmpHeaders());
+      final responseV3 = await _get(uriV3, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP quote error: ${responseV3.statusCode}');
       }
@@ -260,7 +298,7 @@ class ApiService {
           'symbol': symbol,
           'apikey': AppSecrets.alphaVantageKey,
         });
-        final response = await http.get(uri);
+        final response = await _get(uri);
         if (response.statusCode != 200) {
           throw Exception('Alpha Vantage quote error: ${response.statusCode}');
         }
@@ -299,7 +337,7 @@ class ApiService {
       final uri = Uri.parse('$_proxyBase/market/search').replace(queryParameters: {
         'query': query,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy search error: ${response.statusCode}');
       }
@@ -311,7 +349,7 @@ class ApiService {
         'query': query,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
         if (data.isNotEmpty) {
@@ -323,7 +361,7 @@ class ApiService {
         'limit': '50',
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(uriV3, headers: _fmpHeaders());
+      final responseV3 = await _get(uriV3, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP search error: ${responseV3.statusCode}');
       }
@@ -335,7 +373,7 @@ class ApiService {
       'keywords': query,
       'apikey': AppSecrets.alphaVantageKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('Alpha Vantage search error: ${response.statusCode}');
     }
@@ -438,7 +476,7 @@ class ApiService {
         'from': from,
         'to': to,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy history error: ${response.statusCode}');
       }
@@ -453,7 +491,7 @@ class ApiService {
         'to': to,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(lightUri, headers: _fmpHeaders());
+      final response = await _get(lightUri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final dynamic decoded = jsonDecode(response.body);
         final series = _extractSeries(decoded, points: points);
@@ -466,7 +504,7 @@ class ApiService {
         'to': to,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseFull = await http.get(fullUri, headers: _fmpHeaders());
+      final responseFull = await _get(fullUri, headers: _fmpHeaders());
       if (responseFull.statusCode != 200) {
         throw Exception('FMP history error: ${responseFull.statusCode}');
       }
@@ -487,7 +525,7 @@ class ApiService {
         'symbol': symbol,
         'interval': interval,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy intraday error: ${response.statusCode}');
       }
@@ -500,7 +538,7 @@ class ApiService {
         'symbol': symbol,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(stableUri, headers: _fmpHeaders());
+      final response = await _get(stableUri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final dynamic decoded = jsonDecode(response.body);
         final series = _extractSeries(decoded, points: points);
@@ -510,7 +548,7 @@ class ApiService {
       final v3Uri = Uri.parse('$_fmpV3Base/historical-chart/$interval/$symbol').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(v3Uri, headers: _fmpHeaders());
+      final responseV3 = await _get(v3Uri, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP intraday error: ${responseV3.statusCode}');
       }
@@ -565,7 +603,7 @@ class ApiService {
     }
     if (_useProxy) {
       final uri = Uri.parse('$_proxyBase/market/listings');
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy listing error: ${response.statusCode}');
       }
@@ -582,7 +620,7 @@ class ApiService {
       final uri = Uri.parse('$_fmpStableBase/stock-list').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
         if (data.isNotEmpty) {
@@ -598,7 +636,7 @@ class ApiService {
       final uriV3 = Uri.parse('$_fmpV3Base/stock/list').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(uriV3, headers: _fmpHeaders());
+      final responseV3 = await _get(uriV3, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP listing error: ${responseV3.statusCode}');
       }
@@ -616,7 +654,7 @@ class ApiService {
       'state': 'active',
       'apikey': AppSecrets.alphaVantageKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('Alpha Vantage listing error: ${response.statusCode}');
     }
@@ -693,7 +731,7 @@ class ApiService {
       final uri = Uri.parse('$_proxyBase/market/profile').replace(queryParameters: {
         'symbol': symbol,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy profile error: ${response.statusCode}');
       }
@@ -706,7 +744,7 @@ class ApiService {
         'symbol': symbol,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
         if (data.isNotEmpty) return CompanyProfile.fromFmp(data.first);
@@ -714,7 +752,7 @@ class ApiService {
       final uriV3 = Uri.parse('$_fmpV3Base/profile/$symbol').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(uriV3, headers: _fmpHeaders());
+      final responseV3 = await _get(uriV3, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP profile error: ${responseV3.statusCode}');
       }
@@ -727,7 +765,7 @@ class ApiService {
       'symbol': symbol,
       'apikey': AppSecrets.alphaVantageKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('Alpha Vantage overview error: ${response.statusCode}');
     }
@@ -742,7 +780,7 @@ class ApiService {
       final uri = Uri.parse('$_proxyBase/market/quote').replace(queryParameters: {
         'symbol': symbol,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy quote error: ${response.statusCode}');
       }
@@ -755,7 +793,7 @@ class ApiService {
         'symbol': symbol,
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
         if (data.isNotEmpty) return CompanyQuote.fromFmp(data.first);
@@ -763,7 +801,7 @@ class ApiService {
       final uriV3 = Uri.parse('$_fmpV3Base/quote/$symbol').replace(queryParameters: {
         'apikey': AppSecrets.fmpApiKey,
       });
-      final responseV3 = await http.get(uriV3, headers: _fmpHeaders());
+      final responseV3 = await _get(uriV3, headers: _fmpHeaders());
       if (responseV3.statusCode != 200) {
         throw Exception('FMP quote error: ${responseV3.statusCode}');
       }
@@ -776,7 +814,7 @@ class ApiService {
       'symbol': symbol,
       'apikey': AppSecrets.alphaVantageKey,
     });
-    final response = await http.get(uri);
+    final response = await _get(uri);
     if (response.statusCode != 200) {
       throw Exception('Alpha Vantage quote error: ${response.statusCode}');
     }
@@ -799,7 +837,7 @@ class ApiService {
         'symbol': symbol,
         'period': normalizedPeriod,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy financials error: ${response.statusCode}');
       }
@@ -818,7 +856,7 @@ class ApiService {
           'limit': queryLimit,
           'apikey': AppSecrets.fmpApiKey,
         });
-        final stableResponse = await http.get(stableUri, headers: _fmpHeaders());
+        final stableResponse = await _get(stableUri, headers: _fmpHeaders());
         if (stableResponse.statusCode == 200) {
           final dynamic stableDecoded = jsonDecode(stableResponse.body);
           if (stableDecoded is List && stableDecoded.isNotEmpty) {
@@ -830,7 +868,7 @@ class ApiService {
           'limit': queryLimit,
           'apikey': AppSecrets.fmpApiKey,
         });
-        final v3Response = await http.get(v3Uri, headers: _fmpHeaders());
+        final v3Response = await _get(v3Uri, headers: _fmpHeaders());
         if (v3Response.statusCode != 200) return [];
         final dynamic v3Decoded = jsonDecode(v3Response.body);
         return v3Decoded is List ? v3Decoded : [];
@@ -863,7 +901,7 @@ class ApiService {
       final uri = Uri.parse('$_proxyBase/market/peers').replace(queryParameters: {
         'sector': sector,
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy peers error: ${response.statusCode}');
       }
@@ -880,7 +918,7 @@ class ApiService {
         'limit': '20',
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode != 200) {
         throw Exception('FMP peers error: ${response.statusCode}');
       }
@@ -905,7 +943,7 @@ class ApiService {
         'from': _formatDate(fromDate),
         'to': _formatDate(toDate),
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy economic calendar error: ${response.statusCode}');
       }
@@ -921,7 +959,7 @@ class ApiService {
         'to': _formatDate(toDate),
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode != 200) {
         throw Exception('FMP economic calendar error: ${response.statusCode}');
       }
@@ -945,7 +983,7 @@ class ApiService {
         'from': _formatDate(fromDate),
         'to': _formatDate(toDate),
       });
-      final response = await http.get(uri);
+      final response = await _get(uri, headers: _proxyHeaders());
       if (response.statusCode != 200) {
         throw Exception('Proxy earnings calendar error: ${response.statusCode}');
       }
@@ -961,7 +999,7 @@ class ApiService {
         'to': _formatDate(toDate),
         'apikey': AppSecrets.fmpApiKey,
       });
-      final response = await http.get(uri, headers: _fmpHeaders());
+      final response = await _get(uri, headers: _fmpHeaders());
       if (response.statusCode != 200) {
         throw Exception('FMP earnings calendar error: ${response.statusCode}');
       }

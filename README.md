@@ -32,7 +32,7 @@ LAYMARKS is a Flutter market intelligence app with a Node.js data proxy, deliver
 
 ## Environment Setup
 
-1. Copy example env file:
+1. Copy example env file for local development:
 
    ```bash
    cp .env.example .env
@@ -41,6 +41,7 @@ LAYMARKS is a Flutter market intelligence app with a Node.js data proxy, deliver
 2. Fill values in `.env`:
 
    - `API_BASE_URL` (for proxy-backed mode, e.g. `http://127.0.0.1:8787`)
+   - `PROXY_CLIENT_TOKEN` (optional in dev, required if proxy auth is enabled)
    - `FMP_API_KEY`
    - `MARKETAUX_API_KEY`
    - `NEWSAPI_KEY`
@@ -60,6 +61,14 @@ Server runs on:
 
 - `http://0.0.0.0:8787` by default
 - Override with env: `HOST` and `PORT`
+- Security/runtime knobs:
+  - `PROXY_CLIENT_TOKEN` (required bearer token for all non-health endpoints when set)
+  - `CORS_ORIGINS` (comma-separated allowlist, e.g. `https://app.example.com,https://admin.example.com`)
+  - `UPSTREAM_TIMEOUT_MS` (default `15000`)
+  - `RATE_LIMIT_WINDOW_MS` (default `60000`)
+  - `RATE_LIMIT_MAX` (default `120`)
+  - `RATE_LIMIT_EXPENSIVE_MAX` (default `40`)
+  - `TRUST_PROXY` (`1` when behind reverse proxy/load balancer)
 
 ## Run the Flutter App
 
@@ -69,6 +78,18 @@ From project root:
 flutter pub get
 flutter run
 ```
+
+### Build-time configuration (recommended for release)
+
+Prefer build-time defines instead of relying on a bundled `.env` file:
+
+```bash
+flutter run \
+  --dart-define=API_BASE_URL=https://your-proxy.example.com \
+  --dart-define=PROXY_CLIENT_TOKEN=your_proxy_token
+```
+
+For release builds, inject values in CI/CD with `--dart-define` or `--dart-define-from-file`.
 
 ## Test and Validate
 

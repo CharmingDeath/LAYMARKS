@@ -11,20 +11,31 @@ This checklist tracks what is required to ship a production build of LAYMARKS.
 - [x] Widget test no longer hard-fails when `.env` is absent
 - [x] Server cache bounded to prevent unbounded memory growth
 - [x] Proxy-backed financials/peers/economic/earnings APIs wired to Flutter app
+- [x] Proxy hardening: auth token support, CORS allowlist, rate limiting, upstream timeouts
+- [x] Flutter requests hardened with shared timeout + proxy auth header support
+- [x] `.env` asset removed from app bundle to avoid shipping secrets in release binaries
 
 ## Required before store submission
 
 ### 1) Secrets and runtime backend
 
-- [ ] Create production `.env` values for:
-  - `API_BASE_URL`
+- [ ] Configure production server env values for:
   - `FMP_API_KEY`
   - `MARKETAUX_API_KEY`
   - `NEWSAPI_KEY`
   - `ALPHAVANTAGE_API_KEY`
+  - `PROXY_CLIENT_TOKEN`
+  - `CORS_ORIGINS`
+  - `TRUST_PROXY` (set to `1` behind reverse proxy/LB)
+  - `UPSTREAM_TIMEOUT_MS`
+  - `RATE_LIMIT_PER_MINUTE`
+  - `RATE_LIMIT_EXPENSIVE_PER_MINUTE`
 - [ ] Deploy the Node proxy (`server/`) to a production host with TLS.
-- [ ] Set `API_BASE_URL` in app builds to the production proxy URL.
-- [ ] Validate CORS policy in `server/index.js` for production origin restrictions.
+- [ ] Set app build-time values (via `--dart-define` or `--dart-define-from-file`):
+  - `API_BASE_URL`
+  - `PROXY_CLIENT_TOKEN`
+  - (optional) direct-provider keys if not using proxy-only mode
+- [ ] Validate production CORS allowlist behavior for web clients.
 
 ### 2) Android release signing
 
@@ -66,6 +77,8 @@ This checklist tracks what is required to ship a production build of LAYMARKS.
 - [ ] Manual smoke test on real iOS and Android devices.
 - [ ] Confirm startup behavior when `.env` missing/invalid.
 - [ ] Verify all key screens load using production `API_BASE_URL`.
+- [ ] Verify proxy auth enforcement by calling API without/with `Authorization: Bearer <token>`.
+- [ ] Verify proxy rate limits trigger correctly under load tests.
 
 ## Suggested pre-submit command set
 
@@ -75,8 +88,12 @@ From project root:
 flutter pub get
 flutter analyze
 flutter test
-flutter build appbundle --release
-flutter build ios --release
+flutter build appbundle --release \
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=PROXY_CLIENT_TOKEN=replace_me
+flutter build ios --release \
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=PROXY_CLIENT_TOKEN=replace_me
 ```
 
 From `server/`:

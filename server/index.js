@@ -1,11 +1,97 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const rateLimit = require('express-rate-limit');
 
 dotenv.config({ path: require('path').join(__dirname, '..', '.env') });
 
 const app = express();
-app.use(cors());
+app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
+
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const PROXY_CLIENT_TOKEN = process.env.PROXY_CLIENT_TOKEN || '';
+const UPSTREAM_TIMEOUT_MS = (() => {
+  const parsed = Number(process.env.UPSTREAM_TIMEOUT_MS || 15000);
+  if (!Number.isFinite(parsed) || parsed < 1000) return 15000;
+  return Math.floor(parsed);
+})();
+const QUOTE_SYMBOL_LIMIT = (() => {
+  const parsed = Number(process.env.QUOTE_SYMBOL_LIMIT || 50);
+  if (!Number.isFinite(parsed) || parsed < 1) return 50;
+  return Math.floor(parsed);
+})();
+const COMPANY_NEWS_SYMBOL_LIMIT = (() => {
+  const parsed = Number(process.env.COMPANY_NEWS_SYMBOL_LIMIT || 40);
+  if (!Number.isFinite(parsed) || parsed < 1) return 40;
+  return Math.floor(parsed);
+})();
+const APPMINE_ALLOWED_INTERVALS = new Set([
+  '1min',
+  '5min',
+  '15min',
+  '30min',
+  '1hour',
+  '4hour',
+]);
+
+const RATE_LIMIT_WINDOW_MS = (() => {
+  const parsed = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
+  if (!Number.isFinite(parsed) || parsed < 1000) return 60000;
+  return Math.floor(parsed);
+})();
+const RATE_LIMIT_MAX = (() => {
+  const parsed = Number(process.env.RATE_LIMIT_MAX || 120);
+  if (!Number.isFinite(parsed) || parsed < 1) return 120;
+  return Math.floor(parsed);
+})();
+const RATE_LIMIT_EXPENSIVE_MAX = (() => {
+  const parsed = Number(process.env.RATE_LIMIT_EXPENSIVE_MAX || 40);
+  if (!Number.isFinite(parsed) || parsed < 1) return 40;
+  return Math.floor(parsed);
+})();
+
+const globalLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health',
+});
+
+const expensiveLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: RATE_LIMIT_EXPENSIVE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(globalLimiter);
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (!CORS_ORIGINS.length) return callback(null, false);
+      if (CORS_ORIGINS.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'OPTIONS'],
+    maxAge: 600,
+  }),
+);
+
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  if (req.method === 'OPTIONS') return next();
+  if (!PROXY_CLIENT_TOKEN) return next();
+  const auth = req.header('authorization') || '';
+  const xProxy = req.header('x-proxy-key') || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+  if (bearer === PROXY_CLIENT_TOKEN || xProxy === PROXY_CLIENT_TOKEN) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
+});
 
 const FMP_KEY = process.env.FMP_API_KEY || '';
 const MARKETAUX_KEY = process.env.MARKETAUX_API_KEY || '';
@@ -73,9 +159,15 @@ function safeJsonParse(text, fallback = null) {
 }
 
 async function fetchJson(url) {
-  const res = await fetch(url);
-  const text = await res.text();
-  return { status: res.status, text };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const text = await res.text();
+    return { status: res.status, text };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function fetchArray(url) {
@@ -453,17 +545,23 @@ app.get('/news/world', async (req, res) => {
     setCache(key, payload, 5 * 60 * 1000);
     return res.json(payload);
   } catch (error) {
-    return res.status(500).json({ error: error.message || 'World news error' });
+    console.error('world news error', error);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/news/company', async (req, res) => {
+app.get('/news/company', expensiveLimiter, async (req, res) => {
   try {
     const requestedSymbols = (req.query.symbols || req.query.symbol || '').toString().trim();
     const limit = Number(req.query.limit || 100);
-    const symbols =
-      requestedSymbols ||
+    const defaultSymbols =
       'AAPL,MSFT,TSLA,NVDA,BLK,AMZN,META,GOOGL,BRK.A,BRK.B,JPM,V,MA,TSM,ORCL,IBM,INTC,AMD,BABA,AVGO,ADBE,CRM,CSCO,NFLX,PEP,KO,DIS,NKE,ABNB';
+    const symbols = (requestedSymbols || defaultSymbols)
+      .split(',')
+      .map((symbol) => symbol.trim())
+      .filter(Boolean)
+      .slice(0, COMPANY_NEWS_SYMBOL_LIMIT)
+      .join(',');
 
     const key = `company:${symbols}:${limit}`;
     const cached = getCache(key);
@@ -493,20 +591,26 @@ app.get('/news/company', async (req, res) => {
     setCache(key, payload, 5 * 60 * 1000);
     return res.json(payload);
   } catch (error) {
-    return res.status(500).json({ error: error.message || 'Company news error' });
+    console.error('company news error', error);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/market/quote', async (req, res) => {
+app.get('/market/quote', expensiveLimiter, async (req, res) => {
   const symbols = (req.query.symbols || req.query.symbol || '').toString().trim();
   if (!symbols) return res.status(400).json({ error: 'Missing symbols' });
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
 
   const key = `quote:${symbols}`;
   const cached = getCache(key);
   if (cached) return res.json(cached);
 
-  const list = symbols.split(',').map((s) => s.trim()).filter(Boolean);
+  const list = symbols
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter((s) => /^[A-Z0-9.-]{1,20}$/.test(s))
+    .slice(0, QUOTE_SYMBOL_LIMIT);
+  if (!list.length) return res.status(400).json({ error: 'No valid symbols provided' });
   const rows = [];
   const seen = new Set();
 
@@ -540,7 +644,7 @@ app.get('/market/quote', async (req, res) => {
 app.get('/market/profile', async (req, res) => {
   const symbol = req.query.symbol || '';
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const key = `profile:${symbol}`;
   const cached = getCache(key);
   if (cached) return res.json(cached);
@@ -556,7 +660,7 @@ app.get('/market/profile', async (req, res) => {
   }
   const v3Url = `${FMP_V3}/profile/${encodeURIComponent(symbol)}?apikey=${FMP_KEY}`;
   ({ status, text } = await fetchJson(v3Url));
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 30 * 60 * 1000);
   return res.json(data);
@@ -605,7 +709,7 @@ app.get('/market/search', async (req, res) => {
 
 app.get('/market/nyse-directory', async (req, res) => {
   if (!FMP_KEY && !ALPHAVANTAGE_KEY) {
-    return res.status(500).json({ error: 'Missing FMP_API_KEY or ALPHAVANTAGE_API_KEY' });
+    return res.status(503).json({ error: 'Service temporarily unavailable' });
   }
 
   const query = (req.query.query || '').toString().trim();
@@ -662,7 +766,7 @@ app.get('/market/nyse-directory', async (req, res) => {
 
 app.get('/market/listings', async (req, res) => {
   if (!FMP_KEY && !ALPHAVANTAGE_KEY) {
-    return res.status(500).json({ error: 'Missing FMP_API_KEY or ALPHAVANTAGE_API_KEY' });
+    return res.status(503).json({ error: 'Service temporarily unavailable' });
   }
 
   const exchangeQuery = (req.query.exchange || 'NYSE,NASDAQ,LSE').toString();
@@ -683,8 +787,8 @@ app.get('/market/listings', async (req, res) => {
   return res.json(filtered);
 });
 
-app.get('/market/peers', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+app.get('/market/peers', expensiveLimiter, async (req, res) => {
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const sector = req.query.sector || '';
   if (!sector) return res.status(400).json({ error: 'Missing sector' });
   const key = `peers:${sector}`;
@@ -696,14 +800,14 @@ app.get('/market/peers', async (req, res) => {
   url.searchParams.set('limit', '20');
   url.searchParams.set('apikey', FMP_KEY);
   const { status, text } = await fetchJson(url.toString());
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 6 * 60 * 60 * 1000);
   res.json(data);
 });
 
-app.get('/market/financials', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+app.get('/market/financials', expensiveLimiter, async (req, res) => {
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const symbol = (req.query.symbol || '').toString().trim();
   const periodRaw = (req.query.period || 'quarter').toString().trim().toLowerCase();
   const period = periodRaw === 'annual' || periodRaw === 'year' ? 'annual' : 'quarter';
@@ -762,7 +866,7 @@ app.get('/market/financials', async (req, res) => {
 });
 
 app.get('/calendar/economic', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const from = req.query.from || '';
   const to = req.query.to || '';
   const key = `econ:${from}:${to}`;
@@ -774,14 +878,14 @@ app.get('/calendar/economic', async (req, res) => {
   if (to) url.searchParams.set('to', to);
   url.searchParams.set('apikey', FMP_KEY);
   const { status, text } = await fetchJson(url.toString());
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 30 * 60 * 1000);
   res.json(data);
 });
 
 app.get('/calendar/earnings', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const from = req.query.from || '';
   const to = req.query.to || '';
   const key = `earn:${from}:${to}`;
@@ -793,14 +897,14 @@ app.get('/calendar/earnings', async (req, res) => {
   if (to) url.searchParams.set('to', to);
   url.searchParams.set('apikey', FMP_KEY);
   const { status, text } = await fetchJson(url.toString());
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 30 * 60 * 1000);
   res.json(data);
 });
 
-app.get('/market/history', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+app.get('/market/history', expensiveLimiter, async (req, res) => {
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const symbol = req.query.symbol || '';
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
   const from = req.query.from || '';
@@ -829,16 +933,19 @@ app.get('/market/history', async (req, res) => {
   if (to) fullUrl.searchParams.set('to', to);
   fullUrl.searchParams.set('apikey', FMP_KEY);
   ({ status, text } = await fetchJson(fullUrl.toString()));
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 6 * 60 * 60 * 1000);
   res.json(data);
 });
 
-app.get('/market/intraday', async (req, res) => {
-  if (!FMP_KEY) return res.status(500).json({ error: 'Missing FMP_API_KEY' });
+app.get('/market/intraday', expensiveLimiter, async (req, res) => {
+  if (!FMP_KEY) return res.status(503).json({ error: 'Service temporarily unavailable' });
   const symbol = req.query.symbol || '';
-  const interval = req.query.interval || '1hour';
+  const interval = (req.query.interval || '1hour').toString();
+  if (!APPMINE_ALLOWED_INTERVALS.has(interval)) {
+    return res.status(400).json({ error: 'Unsupported interval' });
+  }
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
   const key = `intraday:${symbol}:${interval}`;
   const cached = getCache(key);
@@ -859,7 +966,7 @@ app.get('/market/intraday', async (req, res) => {
   const v3Url = new URL(`${FMP_V3}/historical-chart/${interval}/${encodeURIComponent(symbol)}`);
   v3Url.searchParams.set('apikey', FMP_KEY);
   ({ status, text } = await fetchJson(v3Url.toString()));
-  if (status !== 200) return res.status(status).send(text);
+  if (status !== 200) return res.status(502).json({ error: 'Upstream provider error' });
   const data = safeJsonParse(text, []);
   setCache(key, data, 10 * 60 * 1000);
   res.json(data);
@@ -868,5 +975,5 @@ app.get('/market/intraday', async (req, res) => {
 const PORT = process.env.PORT || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {
-  console.log(`APPMINE proxy running on http://${HOST}:${PORT}`);
+  console.log(`LAYMARKS proxy running on http://${HOST}:${PORT}`);
 });

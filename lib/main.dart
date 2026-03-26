@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart';
 
 import 'data/api_service.dart';
 import 'data/models.dart';
@@ -750,6 +751,9 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayDetails = kReleaseMode
+        ? 'Something went wrong while loading data. Please try again.'
+        : details;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -759,7 +763,7 @@ class _ErrorState extends StatelessWidget {
             children: [
               Text(title, style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              Text(details, textAlign: TextAlign.center),
+              Text(displayDetails, textAlign: TextAlign.center),
               const SizedBox(height: 12),
               FilledButton(onPressed: onRetry, child: const Text('Retry')),
               if (!AppSecrets.isReady) ...[
