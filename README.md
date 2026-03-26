@@ -84,3 +84,9 @@ flutter test
 ## License
 
 MIT
+
+## Release Docs
+
+- `CHANGELOG.md`
+- `docs/release/v0.1.1-checklist.md`
+- `docs/store/app-store-play-store-readiness.md`
