@@ -14,6 +14,16 @@ This guide lists everything needed to publish LAYMARKS to Apple App Store and Go
 
 These must be fixed before production submission.
 
+## Status After `release/v0.1.1-prep`
+
+- Android package id updated to:
+  - `com.charmingdeath.laymarks`
+- iOS bundle id updated to:
+  - `com.charmingdeath.laymarks`
+- App display names updated to `LAYMARKS`.
+- Android release signing template added:
+  - `android/key.properties.example`
+
 ---
 
 ## A) Product Identity
