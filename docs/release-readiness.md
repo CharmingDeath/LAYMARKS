@@ -37,6 +37,20 @@ This checklist tracks what is required to ship a production build of LAYMARKS.
   - (optional) direct-provider keys if not using proxy-only mode
 - [ ] Validate production CORS allowlist behavior for web clients.
 
+### 1.5) Monetization setup (required for revenue)
+
+- [ ] Create paid subscriptions in App Store Connect and Google Play Console:
+  - `laymarks_premium_monthly`
+  - `laymarks_premium_yearly`
+- [ ] Add localizations, pricing tiers, and trial/intro offer strategy.
+- [ ] Add app metadata and screenshots that clearly describe premium benefits.
+- [ ] Verify purchase, restore, cancellation, and renewal flows on both stores.
+- [ ] Ensure legal links are available in-app and store listing:
+  - Privacy Policy
+  - Terms of Use / Subscription Terms
+- [ ] Complete server-side receipt validation endpoint for anti-fraud (recommended before scale).
+- [ ] Review and apply `docs/monetization-model.md`.
+
 ### 2) Android release signing
 
 - [ ] Generate a production upload keystore.

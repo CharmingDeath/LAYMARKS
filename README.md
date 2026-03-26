@@ -130,6 +130,7 @@ flutter test
   ```
 
 See full launch checklist: `docs/release-readiness.md`.
+Monetization and pricing blueprint: `docs/monetization-model.md`.
 
 ## Security Notes
 

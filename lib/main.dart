@@ -5,9 +5,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'data/api_service.dart';
 import 'data/models.dart';
+import 'monetization/subscription_service.dart';
 import 'navigation/app_navigation.dart';
 import 'widgets/common_widgets.dart';
 
@@ -52,6 +54,7 @@ class AppMineApp extends StatelessWidget {
         AppRoutes.news: (_) => const NewsScreen(),
         AppRoutes.companies: (_) => const CompaniesScreen(),
         AppRoutes.saved: (_) => const SavedScreen(),
+        AppRoutes.upgrade: (_) => const UpgradeScreen(),
       },
     );
   }
@@ -98,6 +101,127 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
+class UpgradeScreen extends StatefulWidget {
+  const UpgradeScreen({super.key});
+
+  @override
+  State<UpgradeScreen> createState() => _UpgradeScreenState();
+}
+
+class _UpgradeScreenState extends State<UpgradeScreen> {
+  final SubscriptionService _subscription = SubscriptionService.instance;
+  bool _isLoading = true;
+  bool _isRestoring = false;
+  List<ProductDetails> _products = const [];
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      await _subscription.init();
+      final products = await _subscription.loadProducts();
+      if (!mounted) return;
+      setState(() {
+        _products = products;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$error';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _restore() async {
+    setState(() => _isRestoring = true);
+    try {
+      await _subscription.restorePurchases();
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      if (_subscription.isPremium) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      if (!mounted) return;
+      setState(() => _isRestoring = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBackdrop(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Upgrade to Premium',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    PaywallCard(
+                      products: _products,
+                      onPurchase: (product) async {
+                        await _subscription.buyProduct(product);
+                        await Future<void>.delayed(const Duration(milliseconds: 500));
+                        if (!mounted) return;
+                        if (_subscription.isPremium) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                      onRestore: _isRestoring ? null : _restore,
+                      restoring: _isRestoring,
+                      errorText: _error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Subscription terms',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Payment will be charged to your App Store or Google Play account '
+                      'at confirmation of purchase. Subscription renews automatically '
+                      'unless canceled at least 24 hours before the end of the current period. '
+                      'You can manage and cancel subscriptions from your store account settings.',
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+}
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -107,12 +231,28 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final ApiService _api = ApiService();
+  final SubscriptionService _subscription = SubscriptionService.instance;
   late Future<DashboardData> _future;
 
   @override
   void initState() {
     super.initState();
+    _subscription.init();
+    _subscription.addListener(_onSubscriptionChanged);
     _future = _load();
+  }
+
+  void _onSubscriptionChanged() {
+    if (!mounted) return;
+    setState(() {
+      _future = _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription.removeListener(_onSubscriptionChanged);
+    super.dispose();
   }
 
   Future<DashboardData> _load() async {
@@ -136,12 +276,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     List<EarningsCalendarEvent> earningsEvents = [];
     List<EconomicCalendarEvent> economicEvents = [];
     try {
-      earningsEvents = await _api.fetchEarningsCalendar();
+      earningsEvents = _subscription.isPremium
+          ? await _api.fetchEarningsCalendar()
+          : const [];
     } catch (_) {
       earningsEvents = [];
     }
     try {
-      economicEvents = await _api.fetchEconomicCalendar();
+      economicEvents = _subscription.isPremium
+          ? await _api.fetchEconomicCalendar()
+          : const [];
     } catch (_) {
       economicEvents = [];
     }
@@ -185,7 +329,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const TopBar(title: 'Dashboard'),
+                  TopBar(
+                    title: 'Dashboard',
+                    trailing: !_subscription.isPremium
+                        ? const _UpgradeButton()
+                        : null,
+                  ),
                   const SizedBox(height: 14),
                   Expanded(
                     child: LayoutBuilder(
@@ -241,6 +390,7 @@ class _FocusPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final focus = data.focus;
     final profile = data.focusProfile;
+    final isPremium = SubscriptionService.instance.isPremium;
     return GlassPanel(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -289,7 +439,11 @@ class _FocusPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          if (data.earningsEvents.isEmpty)
+          if (!isPremium)
+            _PremiumLockBanner(
+              message: 'Unlock earnings and economic calendars with Premium.',
+            )
+          else if (data.earningsEvents.isEmpty)
             const Text('No upcoming earnings in range.')
           else
             ...data.earningsEvents.take(3).map(
@@ -309,7 +463,9 @@ class _FocusPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          if (data.economicEvents.isEmpty)
+          if (!isPremium)
+            const SizedBox.shrink()
+          else if (data.economicEvents.isEmpty)
             const Text('No economic events in range.')
           else
             ...data.economicEvents.take(3).map(
@@ -347,12 +503,26 @@ class NewsScreen extends StatefulWidget {
 
 class _NewsScreenState extends State<NewsScreen> {
   final ApiService _api = ApiService();
+  final SubscriptionService _subscription = SubscriptionService.instance;
   late Future<List<NewsArticle>> _future;
 
   @override
   void initState() {
     super.initState();
+    _subscription.init();
+    _subscription.addListener(_onSubscriptionChanged);
     _future = _api.fetchTopNews();
+  }
+
+  void _onSubscriptionChanged() {
+    if (!mounted) return;
+    setState(() => _future = _api.fetchTopNews());
+  }
+
+  @override
+  void dispose() {
+    _subscription.removeListener(_onSubscriptionChanged);
+    super.dispose();
   }
 
   @override
@@ -364,7 +534,12 @@ class _NewsScreenState extends State<NewsScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              const TopBar(title: 'Market News'),
+              TopBar(
+                title: 'Market News',
+                trailing: !_subscription.isPremium
+                    ? const _UpgradeButton()
+                    : null,
+              ),
               const SizedBox(height: 14),
               Expanded(
                 child: FutureBuilder<List<NewsArticle>>(
@@ -385,23 +560,41 @@ class _NewsScreenState extends State<NewsScreen> {
                     if (news.isEmpty) {
                       return const Center(child: Text('No articles available'));
                     }
-                    return GridView.builder(
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 440,
-                            childAspectRatio: 1.3,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
+                    final visible = _subscription.isPremium
+                        ? news
+                        : news.take(8).toList();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_subscription.isPremium)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 12),
+                            child: _PremiumLockBanner(
+                              message:
+                                  'Premium unlocks full news feed history and unlimited access.',
+                            ),
                           ),
-                      itemCount: news.length,
-                      itemBuilder: (context, index) {
-                        final article = news[index];
-                        return NewsCard(
-                          article: article,
-                          onOpen: () => _openUrl(article.url),
-                          onDetails: () => _showDetails(context, article),
-                        );
-                      },
+                        Expanded(
+                          child: GridView.builder(
+                            gridDelegate:
+                                const SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent: 440,
+                                  childAspectRatio: 1.3,
+                                  crossAxisSpacing: 12,
+                                  mainAxisSpacing: 12,
+                                ),
+                            itemCount: visible.length,
+                            itemBuilder: (context, index) {
+                              final article = visible[index];
+                              return NewsCard(
+                                article: article,
+                                onOpen: () => _openUrl(article.url),
+                                onDetails: () => _showDetails(context, article),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -454,13 +647,31 @@ class CompaniesScreen extends StatefulWidget {
 
 class _CompaniesScreenState extends State<CompaniesScreen> {
   final ApiService _api = ApiService();
+  final SubscriptionService _subscription = SubscriptionService.instance;
   late Future<List<CompanySearchItem>> _future;
   String _lastQuery = '';
 
   @override
   void initState() {
     super.initState();
+    _subscription.init();
+    _subscription.addListener(_onSubscriptionChanged);
     _future = _api.fetchAllListings();
+  }
+
+  void _onSubscriptionChanged() {
+    if (!mounted) return;
+    setState(() {
+      _future = _lastQuery.isEmpty
+          ? _api.fetchAllListings()
+          : _api.searchCompanies(_lastQuery);
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription.removeListener(_onSubscriptionChanged);
+    super.dispose();
   }
 
   @override
@@ -474,6 +685,9 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
             children: [
               TopBar(
                 title: 'Companies',
+                trailing: !_subscription.isPremium
+                    ? const _UpgradeButton()
+                    : null,
                 onSearch: (q) {
                   final query = q.trim();
                   if (query.isEmpty) {
@@ -508,19 +722,45 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                         }),
                       );
                     }
-                    final items = snapshot.data ?? [];
+                    final allItems = snapshot.data ?? [];
+                    final items = _subscription.isPremium
+                        ? allItems
+                        : allItems.take(120).toList();
                     return GlassPanel(
-                      child: ListView.separated(
-                        itemCount: items.length,
-                        separatorBuilder: (_, index) => const Divider(),
-                        itemBuilder: (context, index) {
-                          final item = items[index];
-                          return ListTile(
-                            title: Text('${item.name} (${item.symbol})'),
-                            subtitle: Text(item.exchange),
-                            onTap: () => _showCompanyDetails(context, item),
-                          );
-                        },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!_subscription.isPremium)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: _PremiumLockBanner(
+                                message:
+                                    'Premium unlocks full listings, full company details, and peers.',
+                              ),
+                            ),
+                          Expanded(
+                            child: ListView.separated(
+                              itemCount: items.length,
+                              separatorBuilder: (_, index) => const Divider(),
+                              itemBuilder: (context, index) {
+                                final item = items[index];
+                                return ListTile(
+                                  title: Text('${item.name} (${item.symbol})'),
+                                  subtitle: Text(item.exchange),
+                                  onTap: () {
+                                    if (!_subscription.isPremium) {
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.upgrade);
+                                      return;
+                                    }
+                                    _showCompanyDetails(context, item);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -677,12 +917,26 @@ class SavedScreen extends StatefulWidget {
 
 class _SavedScreenState extends State<SavedScreen> {
   final ApiService _api = ApiService();
+  final SubscriptionService _subscription = SubscriptionService.instance;
   late Future<List<NewsArticle>> _future;
 
   @override
   void initState() {
     super.initState();
+    _subscription.init();
+    _subscription.addListener(_onSubscriptionChanged);
     _future = _api.fetchCompanyNews();
+  }
+
+  void _onSubscriptionChanged() {
+    if (!mounted) return;
+    setState(() => _future = _api.fetchCompanyNews());
+  }
+
+  @override
+  void dispose() {
+    _subscription.removeListener(_onSubscriptionChanged);
+    super.dispose();
   }
 
   @override
@@ -694,7 +948,12 @@ class _SavedScreenState extends State<SavedScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              const TopBar(title: 'Company News Feed'),
+              TopBar(
+                title: 'Company News Feed',
+                trailing: !_subscription.isPremium
+                    ? const _UpgradeButton()
+                    : null,
+              ),
               const SizedBox(height: 14),
               Expanded(
                 child: FutureBuilder<List<NewsArticle>>(
@@ -711,20 +970,38 @@ class _SavedScreenState extends State<SavedScreen> {
                             setState(() => _future = _api.fetchCompanyNews()),
                       );
                     }
-                    final articles = snapshot.data ?? [];
+                    final allArticles = snapshot.data ?? [];
+                    final articles = _subscription.isPremium
+                        ? allArticles
+                        : allArticles.take(10).toList();
                     return GlassPanel(
-                      child: ListView.separated(
-                        itemCount: articles.length,
-                        separatorBuilder: (_, index) => const Divider(),
-                        itemBuilder: (context, index) {
-                          final article = articles[index];
-                          return ListTile(
-                            title: Text(article.title),
-                            subtitle: Text(
-                              '${article.source} - ${article.publishedAt}',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!_subscription.isPremium)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: _PremiumLockBanner(
+                                message:
+                                    'Premium unlocks unlimited company news feed and full watchlist workflow.',
+                              ),
                             ),
-                          );
-                        },
+                          Expanded(
+                            child: ListView.separated(
+                              itemCount: articles.length,
+                              separatorBuilder: (_, index) => const Divider(),
+                              itemBuilder: (context, index) {
+                                final article = articles[index];
+                                return ListTile(
+                                  title: Text(article.title),
+                                  subtitle: Text(
+                                    '${article.source} - ${article.publishedAt}',
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -777,6 +1054,46 @@ class _ErrorState extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+class _PremiumLockBanner extends StatelessWidget {
+  const _PremiumLockBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.lock_outline),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message)),
+        ],
+      ),
+    );
+  }
+}
+
+class _UpgradeButton extends StatelessWidget {
+  const _UpgradeButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: () => Navigator.of(context).pushNamed(AppRoutes.upgrade),
+      icon: const Icon(Icons.workspace_premium),
+      label: const Text('Upgrade'),
     );
   }
 }

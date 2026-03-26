@@ -6,6 +6,7 @@ class AppRoutes {
   static const String news = '/news';
   static const String companies = '/companies';
   static const String saved = '/saved';
+  static const String upgrade = '/upgrade';
 }
 
 class AppNavigation {

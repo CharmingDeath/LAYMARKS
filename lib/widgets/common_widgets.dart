@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/models.dart';
@@ -143,10 +144,16 @@ class SideRail extends StatelessWidget {
 }
 
 class TopBar extends StatelessWidget {
-  const TopBar({super.key, required this.title, this.onSearch});
+  const TopBar({
+    super.key,
+    required this.title,
+    this.onSearch,
+    this.trailing,
+  });
 
   final String title;
   final ValueChanged<String>? onSearch;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +177,10 @@ class TopBar extends StatelessWidget {
               ),
             ),
           ),
+        if (trailing != null) ...[
+          if (onSearch != null) const SizedBox(width: 8),
+          trailing!,
+        ],
       ],
     );
   }
@@ -331,5 +342,87 @@ class ContactDialog {
     if (uri != null) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+class PaywallCard extends StatelessWidget {
+  const PaywallCard({
+    super.key,
+    required this.products,
+    required this.onPurchase,
+    this.onRestore,
+    this.restoring = false,
+    this.errorText,
+  });
+
+  final List<ProductDetails> products;
+  final Future<void> Function(ProductDetails product) onPurchase;
+  final Future<void> Function()? onRestore;
+  final bool restoring;
+  final String? errorText;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'LAYMARKS Premium',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Unlock full market news, complete company insights, and premium calendar intelligence.',
+          ),
+          const SizedBox(height: 12),
+          if (products.isEmpty)
+            const Text(
+              'No subscription products are available yet. Configure product IDs in App Store Connect and Google Play Console.',
+            )
+          else
+            ...products.map(
+              (product) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: OutlinedButton(
+                  onPressed: () => onPurchase(product),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${product.title}\n${product.description}',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        product.price,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          if (onRestore != null)
+            TextButton.icon(
+              onPressed: restoring ? null : onRestore,
+              icon: const Icon(Icons.refresh),
+              label: Text(restoring ? 'Restoring...' : 'Restore purchases'),
+            ),
+          if (errorText != null && errorText!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              errorText!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
