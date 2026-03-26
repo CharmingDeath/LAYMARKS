@@ -6,7 +6,12 @@ import 'package:appmine/main.dart';
 void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    await dotenv.load(fileName: '.env');
+    try {
+      await dotenv.load(fileName: '.env');
+    } catch (_) {
+      // Allow smoke tests to run when local env file is absent.
+      dotenv.testLoad(fileInput: '');
+    }
   });
 
   testWidgets('app boot smoke test', (WidgetTester tester) async {
