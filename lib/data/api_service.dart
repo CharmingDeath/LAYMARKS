@@ -666,9 +666,26 @@ class ApiService {
     return fields.map((value) => value.trim()).toList();
   }
 
-  bool _isTargetExchange(String exchange) {
-    final upper = exchange.toUpperCase();
-    return upper.contains('NYSE') || upper.contains('LSE') || upper.contains('LONDON');
+  String _normalizeExchangeLabel(String exchange) {
+    final upper = exchange.toUpperCase().trim();
+    if (upper.isEmpty) return '';
+    if (upper.contains('NEW YORK') || upper.contains('NYSE')) return 'NYSE';
+    if (upper.contains('NASDAQ')) return 'NASDAQ';
+    if (upper.contains('LONDON') || upper.contains('LSE')) return 'LSE';
+    if (upper == 'US') return 'US';
+    return upper;
+  }
+
+  bool _isTargetExchange(String exchange, {List<String> allowed = const ['NYSE', 'NASDAQ', 'LSE']}) {
+    final normalized = _normalizeExchangeLabel(exchange);
+    final allow = allowed.map((x) => x.toUpperCase()).toSet();
+    if (normalized.isEmpty || normalized == 'US') {
+      return allow.contains('NYSE') || allow.contains('NASDAQ') || allow.contains('US');
+    }
+    if (allow.contains('NYSE') && normalized.contains('NYSE')) return true;
+    if (allow.contains('LSE') && normalized.contains('LSE')) return true;
+    if (allow.contains('NASDAQ') && normalized.contains('NASDAQ')) return true;
+    return allow.any(normalized.contains);
   }
 
   Future<CompanyProfile?> fetchCompanyProfile(String symbol) async {
