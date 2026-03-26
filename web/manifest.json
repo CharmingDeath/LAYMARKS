@@ -1,11 +1,11 @@
 {
-    "name": "appmine",
-    "short_name": "appmine",
+    "name": "LAYMARKS",
+    "short_name": "LAYMARKS",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Real-time market intelligence with quotes, company discovery, and financial news.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

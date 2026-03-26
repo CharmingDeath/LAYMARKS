@@ -32,6 +32,8 @@ class DashboardData {
     required this.macro,
     required this.news,
     required this.series,
+    this.earningsEvents = const [],
+    this.economicEvents = const [],
     this.focus,
     this.focusProfile,
   });
@@ -40,6 +42,8 @@ class DashboardData {
   final List<QuoteItem> macro;
   final List<NewsArticle> news;
   final Map<String, List<double>> series;
+  final List<EarningsCalendarEvent> earningsEvents;
+  final List<EconomicCalendarEvent> economicEvents;
   final QuoteItem? focus;
   final CompanyProfile? focusProfile;
 }
@@ -339,6 +343,168 @@ class QuoteItem {
       change: parseNum(json['change']),
       changesPercentage: parseNum(json['changesPercentage']),
       volume: parseNum(json['volume']),
+    );
+  }
+}
+
+class CompanyFinancials {
+  CompanyFinancials({
+    required this.symbol,
+    required this.period,
+    required this.reportDate,
+    required this.revenue,
+    required this.netIncome,
+    required this.totalAssets,
+    required this.totalLiabilities,
+    required this.operatingCashFlow,
+    required this.freeCashFlow,
+  });
+
+  final String symbol;
+  final String period;
+  final String reportDate;
+  final double revenue;
+  final double netIncome;
+  final double totalAssets;
+  final double totalLiabilities;
+  final double operatingCashFlow;
+  final double freeCashFlow;
+
+  static double _num(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static Map<String, dynamic> _firstRow(Map<String, dynamic> json, String key) {
+    final value = json[key];
+    if (value is List && value.isNotEmpty && value.first is Map<String, dynamic>) {
+      return value.first as Map<String, dynamic>;
+    }
+    return const {};
+  }
+
+  factory CompanyFinancials.fromProxy(Map<String, dynamic> json) {
+    final income = _firstRow(json, 'income');
+    final balance = _firstRow(json, 'balance');
+    final cashflow = _firstRow(json, 'cashflow');
+    final reportDate =
+        income['date']?.toString() ??
+        balance['date']?.toString() ??
+        cashflow['date']?.toString() ??
+        '';
+    return CompanyFinancials(
+      symbol: json['symbol']?.toString() ?? '',
+      period: json['period']?.toString() ?? 'quarter',
+      reportDate: reportDate,
+      revenue: _num(income['revenue']),
+      netIncome: _num(income['netIncome']),
+      totalAssets: _num(balance['totalAssets']),
+      totalLiabilities: _num(balance['totalLiabilities']),
+      operatingCashFlow: _num(cashflow['operatingCashFlow']),
+      freeCashFlow: _num(cashflow['freeCashFlow']),
+    );
+  }
+}
+
+class PeerCompany {
+  PeerCompany({
+    required this.symbol,
+    required this.name,
+    required this.sector,
+    required this.price,
+    required this.changePercent,
+    required this.marketCap,
+  });
+
+  final String symbol;
+  final String name;
+  final String sector;
+  final double price;
+  final double changePercent;
+  final double marketCap;
+
+  factory PeerCompany.fromFmp(Map<String, dynamic> json) {
+    double parseNum(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    return PeerCompany(
+      symbol: json['symbol']?.toString() ?? '',
+      name: json['companyName']?.toString() ?? json['name']?.toString() ?? '',
+      sector: json['sector']?.toString() ?? '',
+      price: parseNum(json['price']),
+      changePercent: parseNum(json['changesPercentage']),
+      marketCap: parseNum(json['marketCap']),
+    );
+  }
+}
+
+class EconomicCalendarEvent {
+  EconomicCalendarEvent({
+    required this.date,
+    required this.country,
+    required this.event,
+    required this.impact,
+    required this.actual,
+    required this.previous,
+    required this.estimate,
+  });
+
+  final String date;
+  final String country;
+  final String event;
+  final String impact;
+  final String actual;
+  final String previous;
+  final String estimate;
+
+  factory EconomicCalendarEvent.fromFmp(Map<String, dynamic> json) {
+    return EconomicCalendarEvent(
+      date: json['date']?.toString() ?? '',
+      country: json['country']?.toString() ?? '',
+      event: json['event']?.toString() ?? '',
+      impact: json['impact']?.toString() ?? '',
+      actual: json['actual']?.toString() ?? '',
+      previous: json['previous']?.toString() ?? '',
+      estimate: json['estimate']?.toString() ?? '',
+    );
+  }
+}
+
+class EarningsCalendarEvent {
+  EarningsCalendarEvent({
+    required this.date,
+    required this.symbol,
+    required this.eps,
+    required this.epsEstimated,
+    required this.revenue,
+    required this.revenueEstimated,
+    required this.time,
+  });
+
+  final String date;
+  final String symbol;
+  final double eps;
+  final double epsEstimated;
+  final double revenue;
+  final double revenueEstimated;
+  final String time;
+
+  factory EarningsCalendarEvent.fromFmp(Map<String, dynamic> json) {
+    double parseNum(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    return EarningsCalendarEvent(
+      date: json['date']?.toString() ?? '',
+      symbol: json['symbol']?.toString() ?? '',
+      eps: parseNum(json['eps']),
+      epsEstimated: parseNum(json['epsEstimated']),
+      revenue: parseNum(json['revenue']),
+      revenueEstimated: parseNum(json['revenueEstimated']),
+      time: json['time']?.toString() ?? '',
     );
   }
 }

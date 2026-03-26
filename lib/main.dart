@@ -12,7 +12,11 @@ import 'widgets/common_widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: '.env');
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    dotenv.testLoad(fileInput: '');
+  }
   runApp(const AppMineApp());
 }
 
@@ -126,6 +130,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       points: 24,
     );
     final news = await _api.fetchTopNews();
+    List<EarningsCalendarEvent> earningsEvents = [];
+    List<EconomicCalendarEvent> economicEvents = [];
+    try {
+      earningsEvents = await _api.fetchEarningsCalendar();
+    } catch (_) {
+      earningsEvents = [];
+    }
+    try {
+      economicEvents = await _api.fetchEconomicCalendar();
+    } catch (_) {
+      economicEvents = [];
+    }
     final focus = featured.isNotEmpty ? featured.first : null;
     final focusProfile = focus == null
         ? null
@@ -135,6 +151,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       macro: macro,
       news: news.take(6).toList(),
       series: series,
+      earningsEvents: earningsEvents.take(6).toList(),
+      economicEvents: economicEvents.take(6).toList(),
       focus: focus,
       focusProfile: focusProfile,
     );
@@ -221,8 +239,7 @@ class _FocusPanel extends StatelessWidget {
     final focus = data.focus;
     final profile = data.focusProfile;
     return GlassPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListView(
         children: [
           Text(
             'Focus company',
@@ -249,6 +266,47 @@ class _FocusPanel extends StatelessWidget {
             const SizedBox(height: 4),
             Text(profile.website.isEmpty ? '' : profile.website),
           ],
+          const SizedBox(height: 18),
+          Text(
+            'Upcoming earnings',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (data.earningsEvents.isEmpty)
+            const Text('No upcoming earnings in range.')
+          else
+            ...data.earningsEvents.take(3).map(
+              (event) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '${event.date} • ${event.symbol} • '
+                  'EPS ${event.epsEstimated.toStringAsFixed(2)} est',
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Text(
+            'Economic calendar',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (data.economicEvents.isEmpty)
+            const Text('No economic events in range.')
+          else
+            ...data.economicEvents.take(3).map(
+              (event) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '${event.date} • ${event.country} • ${event.event}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -454,8 +512,35 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     BuildContext context,
     CompanySearchItem item,
   ) async {
-    final profile = await _api.fetchCompanyProfile(item.symbol);
-    final quote = await _api.fetchQuote(item.symbol);
+    CompanyProfile? profile;
+    CompanyQuote? quote;
+    CompanyFinancials? financials;
+    List<PeerCompany> peers = [];
+
+    try {
+      profile = await _api.fetchCompanyProfile(item.symbol);
+    } catch (_) {
+      profile = null;
+    }
+    try {
+      quote = await _api.fetchQuote(item.symbol);
+    } catch (_) {
+      quote = null;
+    }
+    try {
+      financials = await _api.fetchCompanyFinancials(item.symbol);
+    } catch (_) {
+      financials = null;
+    }
+    final sector = profile?.sector.trim() ?? '';
+    if (sector.isNotEmpty) {
+      try {
+        peers = await _api.fetchPeers(sector);
+      } catch (_) {
+        peers = [];
+      }
+    }
+
     if (!context.mounted) return;
     final priceText = quote == null
         ? 'N/A'
@@ -474,6 +559,54 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
               const SizedBox(height: 8),
               Text('Price: $priceText'),
               const SizedBox(height: 8),
+              if (profile?.sector.isNotEmpty ?? false) ...[
+                Text('Sector: ${profile!.sector}'),
+                const SizedBox(height: 8),
+              ],
+              if (financials != null) ...[
+                Text(
+                  'Latest ${financials.period} financials (${financials.reportDate}):',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Revenue: ${_compactMoney(financials.revenue)} • '
+                  'Net income: ${_compactMoney(financials.netIncome)}',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Assets: ${_compactMoney(financials.totalAssets)} • '
+                  'Liabilities: ${_compactMoney(financials.totalLiabilities)}',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Op CF: ${_compactMoney(financials.operatingCashFlow)} • '
+                  'Free CF: ${_compactMoney(financials.freeCashFlow)}',
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (peers.isNotEmpty) ...[
+                Text(
+                  'Sector peers',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                ...peers.take(5).map(
+                  (peer) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '${peer.symbol}  ${peer.name.isEmpty ? '' : '• ${peer.name}'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Text(profile?.description ?? 'No profile information available.'),
             ],
           ),
@@ -486,6 +619,27 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
         ],
       ),
     );
+  }
+
+  String _compactMoney(double value) {
+    if (value == 0) return '\$0';
+    final abs = value.abs();
+    String suffix = '';
+    double scaled = value;
+    if (abs >= 1000000000000) {
+      suffix = 'T';
+      scaled = value / 1000000000000;
+    } else if (abs >= 1000000000) {
+      suffix = 'B';
+      scaled = value / 1000000000;
+    } else if (abs >= 1000000) {
+      suffix = 'M';
+      scaled = value / 1000000;
+    } else if (abs >= 1000) {
+      suffix = 'K';
+      scaled = value / 1000;
+    }
+    return '\$${scaled.toStringAsFixed(abs >= 1000 ? 2 : 0)}$suffix';
   }
 }
 

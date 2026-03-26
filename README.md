@@ -7,6 +7,8 @@ LAYMARKS is a Flutter market intelligence app with a Node.js data proxy, deliver
 - Real-time market quote cards for tracked symbols
 - Business and company-specific news feeds
 - Company search with profile and quote details
+- Company financial snapshots and sector peer discovery
+- Economic and earnings calendar highlights on dashboard
 - Cross-platform Flutter client (macOS, iOS, Android, Linux, Windows, Web)
 - Node.js proxy layer for provider fallback and response normalization
 
@@ -74,6 +76,37 @@ flutter run
 flutter analyze
 flutter test
 ```
+
+## Release Setup (Android + iOS)
+
+### Android signing
+
+1. Copy the template and fill production values:
+
+   ```bash
+   cp android/key.properties.example android/key.properties
+   ```
+
+2. Ensure `storeFile` points to your local upload keystore path.
+
+3. Build release artifacts:
+
+   ```bash
+   flutter build appbundle --release
+   flutter build apk --release
+   ```
+
+### iOS bundle identifier and signing
+
+- iOS bundle identifier is set to `com.laymarks.app`
+- Configure your Apple Developer Team and release signing in Xcode (`Runner` target)
+- Build and archive:
+
+  ```bash
+  flutter build ios --release
+  ```
+
+See full launch checklist: `docs/release-readiness.md`.
 
 ## Security Notes
 

@@ -787,6 +787,193 @@ class ApiService {
     return CompanyQuote.fromAlpha(quote);
   }
 
+  Future<CompanyFinancials?> fetchCompanyFinancials(
+    String symbol, {
+    String period = 'quarter',
+  }) async {
+    final normalizedPeriod = period.toLowerCase() == 'annual' || period.toLowerCase() == 'year'
+        ? 'annual'
+        : 'quarter';
+    if (_useProxy) {
+      final uri = Uri.parse('$_proxyBase/market/financials').replace(queryParameters: {
+        'symbol': symbol,
+        'period': normalizedPeriod,
+      });
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        throw Exception('Proxy financials error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      return CompanyFinancials.fromProxy(decoded);
+    }
+
+    if (_provider == DataProvider.financialModelingPrep) {
+      final queryLimit = normalizedPeriod == 'quarter' ? '8' : '6';
+
+      Future<List<dynamic>> fetchStatement(String type) async {
+        final stableUri = Uri.parse('$_fmpStableBase/$type').replace(queryParameters: {
+          'symbol': symbol,
+          'period': normalizedPeriod,
+          'limit': queryLimit,
+          'apikey': AppSecrets.fmpApiKey,
+        });
+        final stableResponse = await http.get(stableUri, headers: _fmpHeaders());
+        if (stableResponse.statusCode == 200) {
+          final dynamic stableDecoded = jsonDecode(stableResponse.body);
+          if (stableDecoded is List && stableDecoded.isNotEmpty) {
+            return stableDecoded;
+          }
+        }
+        final v3Uri = Uri.parse('$_fmpV3Base/$type/$symbol').replace(queryParameters: {
+          'period': normalizedPeriod,
+          'limit': queryLimit,
+          'apikey': AppSecrets.fmpApiKey,
+        });
+        final v3Response = await http.get(v3Uri, headers: _fmpHeaders());
+        if (v3Response.statusCode != 200) return [];
+        final dynamic v3Decoded = jsonDecode(v3Response.body);
+        return v3Decoded is List ? v3Decoded : [];
+      }
+
+      final results = await Future.wait<List<dynamic>>([
+        fetchStatement('income-statement'),
+        fetchStatement('balance-sheet-statement'),
+        fetchStatement('cash-flow-statement'),
+      ]);
+      final payload = <String, dynamic>{
+        'symbol': symbol,
+        'period': normalizedPeriod,
+        'income': results[0],
+        'balance': results[1],
+        'cashflow': results[2],
+      };
+      if ((results[0]).isEmpty && (results[1]).isEmpty && (results[2]).isEmpty) {
+        return null;
+      }
+      return CompanyFinancials.fromProxy(payload);
+    }
+
+    return null;
+  }
+
+  Future<List<PeerCompany>> fetchPeers(String sector) async {
+    if (sector.trim().isEmpty) return [];
+    if (_useProxy) {
+      final uri = Uri.parse('$_proxyBase/market/peers').replace(queryParameters: {
+        'sector': sector,
+      });
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        throw Exception('Proxy peers error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => PeerCompany.fromFmp(item as Map<String, dynamic>))
+          .where((item) => item.symbol.isNotEmpty)
+          .toList();
+    }
+    if (_provider == DataProvider.financialModelingPrep) {
+      final uri = Uri.parse('$_fmpStableBase/stock-screener').replace(queryParameters: {
+        'sector': sector,
+        'limit': '20',
+        'apikey': AppSecrets.fmpApiKey,
+      });
+      final response = await http.get(uri, headers: _fmpHeaders());
+      if (response.statusCode != 200) {
+        throw Exception('FMP peers error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => PeerCompany.fromFmp(item as Map<String, dynamic>))
+          .where((item) => item.symbol.isNotEmpty)
+          .toList();
+    }
+    return [];
+  }
+
+  Future<List<EconomicCalendarEvent>> fetchEconomicCalendar({
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final fromDate = from ?? DateTime.now();
+    final toDate = to ?? fromDate.add(const Duration(days: 14));
+    if (_useProxy) {
+      final uri = Uri.parse('$_proxyBase/calendar/economic').replace(queryParameters: {
+        'from': _formatDate(fromDate),
+        'to': _formatDate(toDate),
+      });
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        throw Exception('Proxy economic calendar error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => EconomicCalendarEvent.fromFmp(item as Map<String, dynamic>))
+          .toList();
+    }
+    if (_provider == DataProvider.financialModelingPrep) {
+      final uri = Uri.parse('$_fmpStableBase/economic-calendar').replace(queryParameters: {
+        'from': _formatDate(fromDate),
+        'to': _formatDate(toDate),
+        'apikey': AppSecrets.fmpApiKey,
+      });
+      final response = await http.get(uri, headers: _fmpHeaders());
+      if (response.statusCode != 200) {
+        throw Exception('FMP economic calendar error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => EconomicCalendarEvent.fromFmp(item as Map<String, dynamic>))
+          .toList();
+    }
+    return [];
+  }
+
+  Future<List<EarningsCalendarEvent>> fetchEarningsCalendar({
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final fromDate = from ?? DateTime.now();
+    final toDate = to ?? fromDate.add(const Duration(days: 14));
+    if (_useProxy) {
+      final uri = Uri.parse('$_proxyBase/calendar/earnings').replace(queryParameters: {
+        'from': _formatDate(fromDate),
+        'to': _formatDate(toDate),
+      });
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        throw Exception('Proxy earnings calendar error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => EarningsCalendarEvent.fromFmp(item as Map<String, dynamic>))
+          .toList();
+    }
+    if (_provider == DataProvider.financialModelingPrep) {
+      final uri = Uri.parse('$_fmpStableBase/earnings-calendar').replace(queryParameters: {
+        'from': _formatDate(fromDate),
+        'to': _formatDate(toDate),
+        'apikey': AppSecrets.fmpApiKey,
+      });
+      final response = await http.get(uri, headers: _fmpHeaders());
+      if (response.statusCode != 200) {
+        throw Exception('FMP earnings calendar error: ${response.statusCode}');
+      }
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((item) => EarningsCalendarEvent.fromFmp(item as Map<String, dynamic>))
+          .toList();
+    }
+    return [];
+  }
+
   int _newsPageSeed({int offset = 0}) {
     final seed = DateTime.now().millisecondsSinceEpoch ~/ 60000;
     return (seed + offset) % 3 + 1;
