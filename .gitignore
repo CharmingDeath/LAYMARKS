@@ -10,6 +10,7 @@
 .buildlog/
 .history
 .claude/
+.claire/
 .svn/
 .swiftpm/
 migrate_working_dir/

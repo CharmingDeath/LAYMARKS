@@ -8,11 +8,17 @@ import 'package:url_launcher/url_launcher.dart';
 import 'data/api_service.dart';
 import 'data/models.dart';
 import 'navigation/app_navigation.dart';
+import 'payments/subscription_service.dart';
 import 'widgets/common_widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
+  try {
+    await SubscriptionService.instance.initialize();
+  } catch (_) {
+    // Treat as free if subscription initialization fails.
+  }
   runApp(const AppMineApp());
 }
 
@@ -220,37 +226,74 @@ class _FocusPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final focus = data.focus;
     final profile = data.focusProfile;
-    return GlassPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Focus company',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+    return ValueListenableBuilder<bool>(
+      valueListenable: SubscriptionService.instance.isPremium,
+      builder: (context, premium, _) {
+        return GlassPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Focus company',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              if (focus == null)
+                const Text('No quote available')
+              else ...[
+                Text('${focus.name} (${focus.symbol})'),
+                const SizedBox(height: 6),
+                Text('\$${focus.price.toStringAsFixed(2)}'),
+                Text('Change ${focus.changesPercentage.toStringAsFixed(2)}%'),
+              ],
+              const SizedBox(height: 16),
+              if (profile != null) ...[
+                Text(
+                  profile.industry.isEmpty
+                      ? 'Industry unavailable'
+                      : profile.industry,
+                ),
+                const SizedBox(height: 4),
+                Text(profile.website.isEmpty ? '' : profile.website),
+                if (!premium) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Premium unlocks CEO, valuation and 52-week range.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton(
+                    onPressed: () =>
+                        SubscriptionService.instance.presentPaywall(context),
+                    child: const Text('Upgrade to Premium'),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  Text('Sector: ${profile.sector}'),
+                  const SizedBox(height: 6),
+                  Text('CEO: ${profile.ceo}'),
+                  const SizedBox(height: 6),
+                  Text('Market Cap: \$${profile.marketCap.toStringAsFixed(0)}'),
+                  const SizedBox(height: 6),
+                  Text('P/E: ${profile.pe.toStringAsFixed(2)}'),
+                  const SizedBox(height: 6),
+                  Text('EPS: ${profile.eps.toStringAsFixed(2)}'),
+                  const SizedBox(height: 6),
+                  Text(
+                    '52-week: \$${profile.yearLow.toStringAsFixed(2)} - \$${profile.yearHigh.toStringAsFixed(2)}',
+                  ),
+                ],
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          if (focus == null)
-            const Text('No quote available')
-          else ...[
-            Text('${focus.name} (${focus.symbol})'),
-            const SizedBox(height: 6),
-            Text('\$${focus.price.toStringAsFixed(2)}'),
-            Text('Change ${focus.changesPercentage.toStringAsFixed(2)}%'),
-          ],
-          const SizedBox(height: 16),
-          if (profile != null) ...[
-            Text(
-              profile.industry.isEmpty
-                  ? 'Industry unavailable'
-                  : profile.industry,
-            ),
-            const SizedBox(height: 4),
-            Text(profile.website.isEmpty ? '' : profile.website),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -302,21 +345,68 @@ class _NewsScreenState extends State<NewsScreen> {
                     if (news.isEmpty) {
                       return const Center(child: Text('No articles available'));
                     }
-                    return GridView.builder(
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 440,
-                            childAspectRatio: 1.3,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                          ),
-                      itemCount: news.length,
-                      itemBuilder: (context, index) {
-                        final article = news[index];
-                        return NewsCard(
-                          article: article,
-                          onOpen: () => _openUrl(article.url),
-                          onDetails: () => _showDetails(context, article),
+                    return ValueListenableBuilder<bool>(
+                      valueListenable: SubscriptionService.instance.isPremium,
+                      builder: (context, premium, _) {
+                        const int freeLimit = 12;
+                        final int limit = premium
+                            ? news.length
+                            : news.length.clamp(0, freeLimit);
+                        final visible = news.take(limit).toList();
+
+                        return Column(
+                          children: [
+                            if (!premium && news.length > visible.length) ...[
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Upgrade to Premium to unlock more news articles.',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                      ),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => SubscriptionService
+                                          .instance
+                                          .presentPaywall(context),
+                                      child: const Text('Upgrade'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            Expanded(
+                              child: GridView.builder(
+                                gridDelegate:
+                                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 440,
+                                      childAspectRatio: 1.3,
+                                      crossAxisSpacing: 12,
+                                      mainAxisSpacing: 12,
+                                    ),
+                                itemCount: visible.length,
+                                itemBuilder: (context, index) {
+                                  final article = visible[index];
+                                  return NewsCard(
+                                    article: article,
+                                    onOpen: () => _openUrl(article.url),
+                                    onDetails: () =>
+                                        _showDetails(context, article),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
                         );
                       },
                     );
@@ -426,19 +516,72 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                       );
                     }
                     final items = snapshot.data ?? [];
-                    return GlassPanel(
-                      child: ListView.separated(
-                        itemCount: items.length,
-                        separatorBuilder: (_, index) => const Divider(),
-                        itemBuilder: (context, index) {
-                          final item = items[index];
-                          return ListTile(
-                            title: Text('${item.name} (${item.symbol})'),
-                            subtitle: Text(item.exchange),
-                            onTap: () => _showCompanyDetails(context, item),
-                          );
-                        },
-                      ),
+                    return ValueListenableBuilder<bool>(
+                      valueListenable: SubscriptionService.instance.isPremium,
+                      builder: (context, premium, _) {
+                        const int freeLimit = 120;
+                        final int limit = premium
+                            ? items.length
+                            : items.length.clamp(0, freeLimit);
+                        final visible = items.take(limit).toList();
+
+                        final bool truncated =
+                            !premium && items.length > visible.length;
+
+                        return GlassPanel(
+                          child: Column(
+                            children: [
+                              if (truncated) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Upgrade to Premium to unlock more company results.',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface
+                                                    .withValues(alpha: 0.7),
+                                              ),
+                                        ),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => SubscriptionService
+                                            .instance
+                                            .presentPaywall(context),
+                                        child: const Text('Upgrade'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              Expanded(
+                                child: ListView.separated(
+                                  itemCount: visible.length,
+                                  separatorBuilder: (_, index) =>
+                                      const Divider(),
+                                  itemBuilder: (context, index) {
+                                    final item = visible[index];
+                                    return ListTile(
+                                      title: Text(
+                                        '${item.name} (${item.symbol})',
+                                      ),
+                                      subtitle: Text(item.exchange),
+                                      onTap: () =>
+                                          _showCompanyDetails(context, item),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -460,6 +603,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     final priceText = quote == null
         ? 'N/A'
         : '\$${quote.price.toStringAsFixed(2)}';
+    final bool premium = SubscriptionService.instance.isPremium.value;
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -475,14 +619,61 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
               Text('Price: $priceText'),
               const SizedBox(height: 8),
               Text(profile?.description ?? 'No profile information available.'),
+              if (profile != null && premium) ...[
+                const SizedBox(height: 12),
+                Text('Sector: ${profile.sector}'),
+                const SizedBox(height: 6),
+                Text('Industry: ${profile.industry}'),
+                const SizedBox(height: 6),
+                Text('CEO: ${profile.ceo}'),
+                const SizedBox(height: 6),
+                Text('Website: ${profile.website}'),
+                const SizedBox(height: 12),
+                Text('Market Cap: \$${profile.marketCap.toStringAsFixed(0)}'),
+                const SizedBox(height: 6),
+                Text('P/E: ${profile.pe.toStringAsFixed(2)}'),
+                const SizedBox(height: 6),
+                Text('EPS: ${profile.eps.toStringAsFixed(2)}'),
+                const SizedBox(height: 6),
+                Text(
+                  '52-week: \$${profile.yearLow.toStringAsFixed(2)} - \$${profile.yearHigh.toStringAsFixed(2)}',
+                ),
+              ],
+              if (profile != null && !premium) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Premium unlocks CEO, valuation (P/E, EPS), market cap, and 52-week range.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
         actions: [
+          if (!premium)
+            FilledButton(
+              onPressed: () async {
+                await SubscriptionService.instance.presentPaywall(context);
+                if (context.mounted) Navigator.of(context).pop();
+              },
+              child: const Text('Upgrade to Premium'),
+            ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
           ),
+          if (!premium)
+            TextButton(
+              onPressed: () async {
+                await SubscriptionService.instance.restorePurchases();
+                if (context.mounted) Navigator.of(context).pop();
+              },
+              child: const Text('Restore'),
+            ),
         ],
       ),
     );

@@ -128,6 +128,19 @@ Starter pages created in repo:
 
 ---
 
+## D.1) Subscriptions (In-App Purchases)
+
+This app includes a Premium subscription model gated in the UI.
+
+- [ ] RevenueCat (or your subscription provider) configured
+- [ ] Set `REVENUECAT_API_KEY` in `.env` (public key only)
+- [ ] Confirm entitlement id matches `REVENUECAT_ENTITLEMENT_ID` (`premium` by default)
+- [ ] Create subscription products (e.g. monthly + yearly) in your subscription provider
+- [ ] Add App Store / Play Console pricing, agreements, and subscription metadata
+- [ ] Update App Privacy / Data Safety declarations to reflect subscription usage
+
+---
+
 ## E) Operational Readiness
 
 - [ ] Production API proxy deployed (not localhost).

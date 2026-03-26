@@ -38,6 +38,7 @@ dependencies:
   http: ^1.6.0
   google_fonts: ^6.2.1
   url_launcher: ^6.3.0
+  purchases_flutter: ^9.15.1
 
 dev_dependencies:
   flutter_test:
